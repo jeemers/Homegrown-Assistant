@@ -21,3 +21,29 @@ The reservoir volume is tracked via a pressure sensor scale below it, and an ult
 To finish auto-fill, I need to add min and max switches to the res with non-contact IR liquid detectors, and plumb the system.
 
 Currently took a detour to work on pH automation, and the safest methods to do that.
+
+System overview:
+Home Assistant OS running 
+|-influxdb
+|-grafana
+|-mqtt broker
+|-ESPHoome
+|--Sensors:
+|--BME280,AHT10 temp/humidity sensors with air VPD approximation
+|--HX711 load cell amplifier and 4x 50kg load cells for a scale
+|--Ultrasonic range detector
+|--mosfet for ACI fan controller
+|--THC-S moisture, temperature, conductivity sensor, similar to the teros12 for 1/10th the price
+|--peristaltic pumps for dosing and ph control
+|--solenoids on relays for water filling
+
+-smart outlet with water pump for plant watering
+-1/2" and 1/4" irrigation lines for irrigations, 2 lines per plant.
+-2 gallon fabric pots
+
+-all kinds of wires and connectors and whatnots.
+The project really snowballed.
+
+This is all a personal non-commercial project, almsot entirely using open source software. 
+The main goal of this repository is to share the yaml, and logic of how and why I got stuff going, but not a turn-key system yet. There are other open source projects on the horizon that will supercede this one and be a better choice for people in the future, but this is for people who don't want to wait and can hammer it out.
+there may be some guides available in the not too distant future. 
