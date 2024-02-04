@@ -1,0 +1,118 @@
+#this blueprint should be called after the reservoir has been filled ad dosed and water has settled
+#any "auto ph dosing" automations should be disabled before calling this script, and re-enabled after its done
+#this should also be called by the 'auto ph dosing' automation whenever ph reading is outside the min/max
+#---------------------
+#At run, script starts a loop and checks if the current read pH is out of tolerance, and if so, 
+#run a dosing pump to add ph up or down for a desired period of Time
+#then the pump is turned off, and the script delays for minutes until the new ph value settles
+#then the script checks if the current ph is within threshold and repeats
+#it keeps repeating until the dose attempts = max attempts
+#Future plans: calibrate ph adjustment solutions at standard feed EC levels to create a ph calibration
+# to know how much of up or down to add per liter to chang 0.1 ph, and then use the current ph,
+# set point ph, current EC level and volume of water to try to determine how much of either subtance to add
+#as you get closer 7, adjustment demands change and are non-linear, so adapting to that to minimize doses
+#would be ideal.
+blueprint:
+  name: pH Auto Dose
+  description: pH auto dosing script.
+  domain: script
+  input:
+    pump1_entity:
+      name: pH Down pump
+      description: pH Down pump entity
+      selector:
+        entity:
+    pump2_entity:
+      name: pH Up pump
+      description: pH Up pump entity
+      selector:
+        entity:
+    ph_current:
+      name: pH Sensor
+      description: The pH sensor entity
+      selector:
+        entity:
+    ph_goal:
+      name: pH goal
+      description: The entity ID for pH goal
+      selector:
+        entity:
+    ph_tolerance:
+      name: pH Tolerance
+      description: The entity ID for pH tolerance
+      selector:
+        entity:
+    dosing_time:
+      name: Dosing Time
+      description: The entity ID for dosing time
+      selector:
+        entity:
+    dosing_interval:
+      name: Dosing Interval
+      description: The entity ID for dosing interval
+      selector:
+        entity:
+    doses_max:
+      name: Max doses
+      description: Counter to define maximum dosing attempts
+      selector:
+        entity:
+    dose_counter:
+      name: Dose counter
+      description: Counter to count the doses
+      selector:
+        entity:
+        
+variables:
+    ph_current: !input 'ph_current'
+    ph_goal: !input 'ph_goal'
+    ph_tolerance: !input 'ph_tolerance'
+    dosing_time: !input 'dosing_time'
+    dosing_interval: !input 'dosing_interval'
+    doses_max: !input 'doses_max'
+    dose_counter: !input 'dose_counter'
+    
+sequence:
+  - service: counter.reset
+    target:
+      entity_id: !input 'dose_counter'
+  - repeat:
+      sequence:
+        - service: counter.increment
+          target:
+            entity_id: !input 'dose_counter'
+        - choose:
+            - conditions:
+                - "{{ states(ph_current)|float >= states(ph_goal)|float + states(ph_tolerance)|float }}"
+              sequence:
+                - service: switch.turn_on
+                  target:
+                    entity_id: !input 'pump1_entity'
+                - delay:
+                    seconds: "{{ states(dosing_time)|float }}"
+                - service: switch.turn_off
+                  target:
+                    entity_id: !input 'pump1_entity'
+            - conditions:
+                - "{{ states(ph_current)|float <= states(ph_goal)|float- states(ph_tolerance)|float }}"
+              sequence:
+                - service: switch.turn_on
+                  target:
+                    entity_id: !input 'pump2_entity'
+                - delay:
+                    seconds: "{{ states(dosing_time)|float }}"
+                - service: switch.turn_off
+                  target:
+                    entity_id: !input 'pump2_entity'
+                
+        - delay:
+            seconds: "{{ states(dosing_interval)|float*60 }}"
+      until:
+        - condition: or
+          conditions:
+            - condition: template
+              value_template: "{{ (states(ph_goal)|float - states(ph_current)|float)|float|round(1) < states(ph_tolerance)|float }}"
+            - condition: template
+              value_template: "{{ states(dose_counter)|float >= states(doses_max)|float }}"
+mode: single
+icon: mdi:test-tube
