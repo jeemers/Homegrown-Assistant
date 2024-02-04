@@ -111,7 +111,7 @@ sequence:
         - condition: or
           conditions:
             - condition: template
-              value_template: "{{ (states(ph_goal)|float - states(ph_current)|float)|float|round(1) < states(ph_tolerance)|float }}"
+              value_template: "{{ (states(ph_goal)|float - states(ph_current)|float)|float|abs|round(1) < states(ph_tolerance)|float }}"
             - condition: template
               value_template: "{{ states(dose_counter)|float >= states(doses_max)|float }}"
 mode: single
