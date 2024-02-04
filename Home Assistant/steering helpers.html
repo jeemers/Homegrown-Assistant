@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home Assistant Steering Helper Generator</title>
+</head>
+<body>
+  <h1>Home Assistant Steering Helper Generator</h1>
+  <textarea id="inputEntities" placeholder="Enter consolidated list of entities"></textarea>
+  <button onclick="generateHelpers()">Generate YAML</button>
+  <h2>Generated YAML:</h2>
+  <textarea id="outputYAML" readonly></textarea>
+
+  <script>
+    function generateHelpers() {
+      const inputEntities = document.getElementById('inputEntities').value.trim().split('\n');
+      const outputYAML = document.getElementById('outputYAML');
+
+      const inputNumbers = [];
+      const inputBooleans = [];
+
+      inputEntities.forEach(entity => {
+        const trimmedEntity = entity.trim();
+        if (trimmedEntity.startsWith('input_number')) {
+          inputNumbers.push(trimmedEntity);
+        } else if (trimmedEntity.startsWith('input_boolean')) {
+          inputBooleans.push(trimmedEntity);
+        }
+      });
+
+      const yamlLines = ['input_number:',];
+
+		inputBooleans.forEach(inputBoolean => {
+			yamlLines.push(`  ${inputBoolean}:`);
+			yamlLines.push(`    name: ${inputBoolean.split('.')[1]}`);
+			yamlLines.push(`    initial: 0`);
+			yamlLines.push(`    icon: mdi:checkbox-marked-outline`);
+		  });
+		  yamlLines.push(`input_boolean:`);
+		inputNumbers.forEach(inputNumber => {
+			yamlLines.push(`  ${inputNumber}:`);
+			yamlLines.push(`    name: ${inputNumber.split('.')[1]}`);
+			yamlLines.push(`    initial: 100`);
+			yamlLines.push(`    min: 0`);
+			yamlLines.push(`    max: 500`);
+			yamlLines.push(`    mode: box`);
+			yamlLines.push(`    step: 1`);
+			yamlLines.push(`    icon: mdi:numeric`);
+		  });
+
+      outputYAML.value = yamlLines.join('\n');
+    }
+  </script>
+</body>
+</html>
