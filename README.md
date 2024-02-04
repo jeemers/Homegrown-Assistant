@@ -42,7 +42,7 @@ Home Assistant OS running
 -2 gallon fabric pots
 
 -all kinds of wires and connectors and whatnots.
-The project really snowballed.
+The project really snowballed. Total cost sunk into all the automation stuff is probably 2-300 bucks total, including the server running HA.
 
 This is all a personal non-commercial project, almsot entirely using open source software. 
 The main goal of this repository is to share the yaml, and logic of how and why I got stuff going, but not a turn-key system yet. There are other open source projects on the horizon that will supercede this one and be a better choice for people in the future, but this is for people who don't want to wait and can hammer it out.
