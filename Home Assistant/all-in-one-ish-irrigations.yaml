@@ -1,0 +1,513 @@
+# home assistant all in one irrigation automation 
+#So this does a lot
+#test version 1
+#author jeemers
+#----------------------
+#Okay so I got carried away sorry not sorry.
+#I'll just give basic outline of how it works, there are several triggers and various selectors later based on those triggers.
+#Its triggered by:
+#-any of the listed entities being updated - which in turn updates the 'water use estimate' value - this trigger may be removed entirely.
+#-triggered every <p1 frequency> while irrigation stage = p1
+#-when vwc drops below p2-vwc-min-target, and irrigation stage = p2
+#-at lights on and off
+#-when the main irrigation pump turns on
+#-after lights on when the vwc has gone down enough to end P3 and start P1 based on user inputs
+#
+# It checks if maintainence mode is disabled - this may be moved later
+#
+# Then, based on which trigger started the automation, it chooses to act:
+# - on lights on trigger, it resets variables necessary to start the day
+# - on P3 trigger, when vwc has dropped enough, set stage to P1 and start P1 irrigations  (to-do, add a p1 start time fallback)
+# - on P1 trigger, it checks if the vwc appears to be at field capacity/runoff, and if it has irrigated enough times, will set field capacity
+#   Then will repeat until target EC is reached or maximum p1 shots has been reached
+# - on p2 trigger, turn pump on for p2 duration, turn off p2 pump
+# - on pump trigger, if the pump was manually turnedo n during p1 or p2, it will give a p1 or p2 shot. if it was manually turned on during p3, it will turn off unless p3 needs water is true
+# - on lights off trigger, variables will be set for lights off.
+# - on states trigger, it just updates daily water use estimate, which may be replaced by a tempalte sensor isntead
+#
+# To-do: I forgot to add a "at p2 window close time..." trigger, to end p2, provide an additional p2 shot , and start p3
+#
+# It's a bit overkill but it seems to be working. and was fun.
+
+alias: irrigation omnibus automation
+description: I was trying to make a blueprint from this but might have to make an add-on or just rethink how I handle a lot of these helpers being used as global variables.
+trigger:
+  - platform: state
+    entity_id:
+      - input_number.2x4_media_volume
+      - sensor.2x4_p2_min_wc_target
+      - input_number.2x4_drip_flow_rate
+      - input_number.2x4_plant_count
+      - counter.2x4_daily_irrigation_events
+      - sensor.2x4_p1_irrigation_time
+      - input_number.2x4_p1_shot
+      - input_number.2x4_field_capacity
+      - input_number.2x4_p2_shot
+      - input_number.2x4_p2_last_high
+    id: statetrigger
+  - platform: template
+    value_template: >-
+      {{ now().minute | int % states('input_number.2x4_p1_frequency')|int(2) ==
+      0 and states('input_select.2x4_irrigation_phase') == "P1" }}
+    enabled: true
+    id: p1trigger
+  - platform: template
+    value_template: >-
+      {{(states('input_select.2x4_irrigation_phase') == "P2") and
+      states('sensor.thcs2adjustedwc')|float <=
+      states('sensor.2x4_p2_min_wc_target')|float }} 
+    id: p2trigger
+  - platform: template
+    value_template: >-
+      {{ (states('input_number.2x4_p3_wc_at_lights_on') | float -
+
+      states('sensor.thcs2adjustedwc') | float)|abs >=
+      states('input_number.2x4_p0_dryback_target')|float
+
+      and states('switch.shelly_2_channel_1') == 'on'}}
+    for:
+      hours: 0
+      minutes: 1
+      seconds: 0
+    id: p3trigger
+  - platform: state
+    entity_id:
+      - switch.pump_valve
+    to: "on"
+    id: pumptrigger
+  - platform: time
+    at: input_datetime.2x4_lights_on
+    id: lightsontrigger
+  - platform: time
+    at: input_datetime.2x4_lights_off
+    id: lightsofftrigger
+condition:
+  - condition: state
+    entity_id: input_boolean.2x4_maintainence_mode
+    state: "off"
+    enabled: true
+action:
+  - if:
+      - condition: trigger
+        id:
+          - p3trigger
+    then:
+      - service: input_select.select_option
+        data:
+          option: P1
+        target:
+          entity_id: input_select.2x4_irrigation_phase
+      - if:
+          - condition: template
+            value_template: >-
+              {% set currentdryback =  100 *
+              ((states('input_number.2x4_p3_start_wc') | float -
+              states('sensor.thcs2adjustedwc')|float) /
+              states('input_number.2x4_p3_start_wc')| float) %}
+
+              {{ (currentdryback >= states('input_number.2x4_p3_dryback_target')
+              | int) or (states('sensor.thcs2adjustedwc') | float) <=
+              (states('sensor.2x4_p3_target_wc') | float) }}
+        then:
+          - service: input_number.set_value
+            data:
+              value: "{{ states('sensor.thcs2adjustedwc') }}"
+            target:
+              entity_id: input_number.2x4_p3_end_wc
+          - service: input_number.set_value
+            data:
+              value: |-
+                {{ 100 * (
+                   (states('input_number.2x4_p3_start_wc') | float - states('input_number.2x4_p3_end_wc')|float)
+                   / states('input_number.2x4_p3_start_wc')| float) }}
+            target:
+              entity_id: input_number.2x4_p3_last_dryback
+            enabled: true
+  - choose:
+      - conditions:
+          - condition: trigger
+            id:
+              - p1trigger
+              - p3trigger
+          - condition: time
+            after: input_datetime.2x4_lights_on
+            before: input_datetime.2x4_p2_window_close
+        sequence:
+          - if:
+              - condition: template
+                value_template: |-
+                  {{ (states('input_boolean.2x4_p1_at_field_capacity') == 'on')
+                     and
+                     (
+                       (states('sensor.thcs2pwec') | float <= states('input_number.2x4_p2_ec_target')|float)
+                     or 
+                       (states('counter.2x4_p1_shot_count')|int >= (states('counter.2x4_p1_shots_target')|int + 1))
+                     )}}
+            then:
+              - service: input_select.select_option
+                data:
+                  option: P2
+                target:
+                  entity_id: input_select.2x4_irrigation_phase
+              - if:
+                  - condition: template
+                    value_template: >
+                      {{ (states('counter.2x4_p1_shot_count')|int >
+                      states('counter.2x4_p1_shots_target')|int) }}
+                then:
+                  - service: notify.persistent_notification
+                    data:
+                      message: >-
+                        Extra P1 shots detected. pwEC:
+                        {{states('sensor.thcs2pwec') | float }} EC Target:
+                        {{states('input_number.2x4_p2_ec_target')|float}} Total
+                        P1 shots: {{states('counter.2x4_p1_shot_count')|int }}
+              - stop: >-
+                  Either hit target shots+1 or hit EC target after getting to
+                  field capacity.
+          - if:
+              - condition: template
+                value_template: |2-
+                      {% if (states('input_select.2x4_steering') == "Vegetative") or
+                      (states('input_select.2x4_steering') == "Vegetative - bulk")  %}
+                        {{ (states('counter.2x4_p1_shot_count')|int >=3 
+                       and ((states('sensor.thcs2adjustedwc') | float - states('input_number.2x4_p2_last_low') | float)|abs <= 1.2)) }}
+                      {% else %}
+                        {{ states('counter.2x4_p1_shot_count')|int >=3 
+                           and (
+                           (states('input_number.2x4_p2_last_high')|float - states('sensor.thcs2adjustedwc')|float > 3)
+                           or
+                           (states('sensor.thcs2adjustedwc') | float - states('input_number.2x4_p2_last_low')|float|abs <= 1.2))
+                           }}
+                      {% endif %}
+            then:
+              - service: input_number.set_value
+                data:
+                  value: "{{ states('sensor.thcs2adjustedwc') }}"
+                target:
+                  entity_id: input_number.2x4_field_capacity
+              - service: input_boolean.turn_on
+                data: {}
+                target:
+                  entity_id: input_boolean.2x4_p1_at_field_capacity
+              - if:
+                  - condition: numeric_state
+                    entity_id: input_number.2x4_p2_last_high
+                    above: input_number.2x4_p1_runoff_wc
+                then:
+                  - service: input_number.set_value
+                    data:
+                      value: |
+                        {{ states('input_number.2x4_p2_last_high') }}
+                    target:
+                      entity_id: input_number.2x4_p1_runoff_wc
+              - if:
+                  - condition: template
+                    value_template: >
+                      {{ (states('input_select.2x4_steering') == "Generative -
+                      Flip") 
+                         or
+                         (states('input_select.2x4_steering') == "Generative - Finish")  
+                      }}
+                then:
+                  - service: input_select.select_option
+                    data:
+                      option: P2
+                    target:
+                      entity_id: input_select.2x4_irrigation_phase
+                  - if:
+                      - condition: template
+                        value_template: |2
+                            {{ (states('counter.2x4_p1_shot_count')|int > states('counter.2x4_p1_shots_target')|int) }}
+                    then:
+                      - service: notify.persistent_notification
+                        data:
+                          message: >-
+                            Extra P1 shots detected. pwEC:
+                            {{states('sensor.thcspwec') | float }} EC Target:
+                            {{states('input_number.2x4_p2_ec_target')|float}}
+                            Total P1 shots:
+                            {{states('counter.2x4_p1_shot_count')|int }}
+                  - stop: Got to FC for generative steering boss
+            enabled: true
+          - if:
+              - condition: numeric_state
+                entity_id: counter.2x4_p1_shot_count
+                below: 1
+            then:
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {% set currentdryback = 100 *
+                      ((states('input_number.2x4_p3_start_wc') | float -
+                      states('sensor.thcs2adjustedwc')|float) /
+                      states('input_number.2x4_p3_start_wc')| float) %}
+
+
+                      {{ ((states('input_number.2x4_p3_wc_at_lights_on') | float
+                      -
+
+                      states('sensor.thcs2adjustedwc') | float) >=
+
+                      (states('input_number.2x4_p0_dryback_target') | float)) or
+
+                      (currentdryback >=
+                      states('input_number.2x4_p3_dryback_target') | float)
+
+                      or (states('sensor.thcs2adjustedwc') | float) <=
+
+                      (states('sensor.2x4_p3_target_wc') | float)
+
+                      or (states('sensor.thcs2adjustedwc') | float) <=
+
+                      (states('input_number.2x4_wc_too_low') | float)  }}
+                then:
+                  - service: input_number.set_value
+                    data:
+                      value: "{{ states('sensor.thcs2adjustedwc') }}"
+                    target:
+                      entity_id: input_number.2x4_p3_end_wc
+                  - service: input_number.set_value
+                    data:
+                      value: >-
+                        {{    (100 * ((states('input_number.2x4_p3_start_wc') |
+                        float - states('input_number.2x4_p3_end_wc')|float) /
+                        states('input_number.2x4_p3_start_wc')| float))|round(2)
+                        }}
+                    target:
+                      entity_id: input_number.2x4_p3_last_dryback
+                    enabled: true
+                  - service: counter.increment
+                    data: {}
+                    target:
+                      entity_id:
+                        - counter.2x4_p1_shot_count
+                        - counter.2x4_daily_irrigation_events
+                  - type: turn_on
+                    device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                    entity_id: 81314d82dcd63a7d721237034016cedb
+                    domain: switch
+                  - delay: "{{ states('sensor.2x4_p1_irrigation_time') }}"
+                  - service: input_datetime.set_datetime
+                    data:
+                      entity_id: input_datetime.2x4_last_irrigation_time
+                      time: "{{ now().strftime('%H:%M:%S') }}"
+                else: []
+            else:
+              - if:
+                  - condition: numeric_state
+                    entity_id: counter.2x4_p1_shot_count
+                    above: 0
+                then:
+                  - service: counter.increment
+                    data: {}
+                    target:
+                      entity_id:
+                        - counter.2x4_p1_shot_count
+                        - counter.2x4_daily_irrigation_events
+                  - type: turn_on
+                    device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                    entity_id: 81314d82dcd63a7d721237034016cedb
+                    domain: switch
+                  - delay: "{{ states('sensor.2x4_p1_irrigation_time') }}"
+                  - service: input_datetime.set_datetime
+                    data:
+                      entity_id: input_datetime.2x4_last_irrigation_time
+                      time: "{{ now().strftime('%H:%M:%S') }}"
+          - service: input_number.set_value
+            data:
+              value: "{{ states('sensor.thcs2adjustedwc') }}"
+            target:
+              entity_id:
+                - input_number.2x4_p2_last_low
+                - input_number.2x4_p2_last_high
+          - service: switch.turn_off
+            data: {}
+            target:
+              entity_id: switch.pump_valve
+          - delay:
+              hours: 0
+              minutes: 5
+              seconds: 0
+              milliseconds: 0
+      - conditions:
+          - condition: trigger
+            id:
+              - p2trigger
+          - condition: state
+            entity_id: input_select.2x4_irrigation_phase
+            state: P2
+        sequence:
+          - service: input_number.set_value
+            data:
+              entity_id: input_number.2x4_p2_last_low
+              value: "{{ states('sensor.thcs2adjustedwc') }}"
+          - service: input_number.set_value
+            data:
+              entity_id: input_number.2x4_p2_last_dryback
+              value: >-
+                {{ states('input_number.2x4_p2_last_high') | float -
+                states('sensor.thcs2adjustedwc') | float }}
+          - service: input_number.set_value
+            data:
+              entity_id: input_number.2x4_p2_last_high
+              value: "{{ states('sensor.thcs2adjustedwc') }}"
+          - type: turn_on
+            device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+            entity_id: 81314d82dcd63a7d721237034016cedb
+            domain: switch
+          - service: counter.increment
+            data: {}
+            target:
+              entity_id: counter.2x4_daily_irrigation_events
+          - delay: "{{ states('sensor.2x4_p2_irrigation_time') }}"
+          - service: input_datetime.set_datetime
+            data:
+              entity_id: input_datetime.2x4_last_irrigation_time
+              time: "{{ now().strftime('%H:%M:%S') }}"
+          - service: switch.turn_off
+            data: {}
+            target:
+              entity_id: switch.pump_valve
+          - delay:
+              hours: 0
+              minutes: 5
+              seconds: 0
+              milliseconds: 0
+      - conditions:
+          - condition: trigger
+            id:
+              - pumptrigger
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_select.2x4_irrigation_phase
+                    state: P1
+                sequence:
+                  - delay: "{{ states('sensor.2x4_p1_irrigation_time') }}"
+              - conditions:
+                  - condition: state
+                    entity_id: input_select.2x4_irrigation_phase
+                    state: P2
+                sequence:
+                  - delay: "{{ states('sensor.2x4_p2_irrigation_time') }}"
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.2x4_p3_needs_water
+                    state: "on"
+                sequence:
+                  - delay: >-
+                      {{
+                      max(states('sensor.2x4_p2_irrigation_time'),states('sensor.2x4_p1_irrigation_time'))
+                      }}
+            default: []
+          - service: switch.turn_off
+            data: {}
+            target:
+              entity_id: switch.pump_valve
+      - conditions:
+          - condition: trigger
+            id:
+              - lightsontrigger
+        sequence:
+          - service: input_number.set_value
+            data:
+              value: "{{ states('sensor.thcs2adjustedwc') }}"
+            target:
+              entity_id: input_number.2x4_p3_wc_at_lights_on
+          - service: input_number.set_value
+            data:
+              value: 35
+            target:
+              entity_id:
+                - input_number.2x4_p2_last_low
+                - input_number.2x4_p2_last_high
+                - input_number.2x4_p1_runoff_wc
+          - service: counter.reset
+            data: {}
+            target:
+              entity_id:
+                - counter.2x4_daily_irrigation_events
+                - counter.2x4_p1_shot_count
+          - service: input_number.set_value
+            data:
+              value: 0
+            target:
+              entity_id:
+                - input_number.2x4_total_daily_ml_estimate
+          - service: input_boolean.turn_off
+            data: {}
+            target:
+              entity_id:
+                - input_boolean.2x4_p1_at_field_capacity
+      - conditions:
+          - condition: trigger
+            id:
+              - lightsofftrigger
+        sequence:
+          - service: input_number.set_value
+            data:
+              value: "{{ states('sensor.thcs2adjustedwc') }}"
+            target:
+              entity_id: input_number.2x4_p3_wc_at_lights_off
+          - service: input_number.set_value
+            data:
+              value: "{{ states('input_number.2x4_p2_last_high') }}"
+            target:
+              entity_id: input_number.2x4_p3_start_wc
+          - service: input_select.select_option
+            data:
+              option: P3
+            target:
+              entity_id: input_select.2x4_irrigation_phase
+          - service: counter.reset
+            data: {}
+            target:
+              entity_id:
+                - counter.2x4_p1_shot_count
+          - if:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: input_select.2x4_steering_stage
+                    state: Vegetative
+                  - condition: state
+                    entity_id: input_select.2x4_steering_stage
+                    state: Generative - Bulk
+            then:
+              - type: turn_on
+                device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                entity_id: 4acc9ceaf69610119df87e89b3726fac
+                domain: switch
+              - delay: "{{ states('sensor.2x4_p1_irrigation_time') }}"
+              - type: turn_off
+                device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                entity_id: 4acc9ceaf69610119df87e89b3726fac
+                domain: switch
+      - conditions:
+          - condition: trigger
+            id:
+              - statetrigger
+        sequence:
+          - service: input_number.set_value
+            data_template:
+              entity_id: input_number.2x4_total_daily_ml_estimate
+              value: >
+                {% set p2volume = states('sensor.2x4_p2_shot_volume') | float
+                %}  {% set pcount = states('input_number.2x4_plant_count') |
+                float %} {% set events =
+                states('counter.2x4_daily_irrigation_events') | float -
+                states('counter.2x4_p1_shot_count') | float %} {% set totalmlp2
+                = p2volume * pcount | float %} {% set p1totalvolume =  (
+                 (
+                  (states('input_number.2x4_drip_flow_rate') | float / 60) 
+                  *states('sensor.2x4_p1_irrigation_time') | float
+                 ) 
+                  * pcount | float
+                ) * states('counter.2x4_p1_shot_count') | float %}  {% set
+                totalmlp2d = (events) * totalmlp2 %}  {% set totalmlday =
+                p1totalvolume + totalmlp2d %} {{ totalmlday | float}}
+mode: single
+trace:
+  stored_traces: 20
