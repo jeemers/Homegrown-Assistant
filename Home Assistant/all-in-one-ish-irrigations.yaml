@@ -59,12 +59,8 @@ trigger:
     id: p2trigger
   - platform: template
     value_template: >-
-      {{ (states('input_number.2x4_p3_wc_at_lights_on') | float -
-
-      states('sensor.thcs2adjustedwc') | float)|abs >=
-      states('input_number.2x4_p0_dryback_target')|float
-
-      and states('switch.shelly_2_channel_1') == 'on'}}
+      {{ ((states('input_number.2x4_p3_wc_at_lights_on') | float - states('sensor.thcs2adjustedwc') | float)|abs >= states('input_number.2x4_p0_dryback_target')|float) or (states('sensor.thcs2adjustedwc')|float <= states('sensor.2x4_p3_target_wc')|float)
+      and states('switch.shelly_2_channel_1') == 'on'}} 
     for:
       hours: 0
       minutes: 1
