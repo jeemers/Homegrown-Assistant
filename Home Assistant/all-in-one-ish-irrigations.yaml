@@ -23,21 +23,26 @@
 # - on p2 trigger, turn pump on for p2 duration, turn off p2 pump
 # - on pump trigger, if the pump was manually turnedo n during p1 or p2, it will give a p1 or p2 shot. if it was manually turned on during p3, it will turn off unless p3 needs water is true
 # - on lights off trigger, variables will be set for lights off.
-# - on states trigger, it just updates daily water use estimate, which may be replaced by a tempalte sensor isntead
-#
-# To-do: I forgot to add a "at p2 window close time..." trigger, to end p2, provide an additional p2 shot , and start p3
+# - at the p2 window close time, set dryback start %, give one last shot if we are in veg/bulk
 #
 # It's a bit overkill but it seems to be working. and was fun.
-
 alias: steering - 2x4 - Irrigation Station
 description: the blueprint to the irrigation blueprint
 trigger:
+  - platform: state
+    entity_id:
+      - switch.pump_valve
+    to: "on"
+    id: pumptrigger
   - platform: time
     at: input_datetime.2x4_lights_on
     id: lightsontrigger
   - platform: time
     at: input_datetime.2x4_lights_off
     id: lightsofftrigger
+  - platform: time
+    at: input_datetime.2x4_p2_window_close
+    id: p2windowclosetrigger
   - platform: template
     value_template: >-
       {{ ((states('input_number.2x4_p3_wc_at_lights_on') | float -
@@ -65,11 +70,6 @@ trigger:
       states('sensor.thcs2adjustedwc')|float <=
       states('sensor.2x4_p2_min_wc_target')|float }} 
     id: p2trigger
-  - platform: state
-    entity_id:
-      - switch.pump_valve
-    to: "on"
-    id: pumptrigger
 condition:
   - condition: state
     entity_id: input_boolean.2x4_maintainence_mode
@@ -511,6 +511,49 @@ action:
             target:
               entity_id: input_boolean.2x4_p1_at_field_capacity
             data: {}
+      - conditions:
+          - condition: trigger
+            id:
+              - p2windowclosetrigger
+        sequence:
+          - service: input_number.set_value
+            data:
+              value: "{{ states('input_number.2x4_p2_last_high') }}"
+            target:
+              entity_id: input_number.2x4_p3_start_wc
+          - service: input_select.select_option
+            data:
+              option: P3
+            target:
+              entity_id: input_select.2x4_irrigation_phase
+          - if:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: input_select.2x4_steering_stage
+                    state: Vegetative
+                  - condition: state
+                    entity_id: input_select.2x4_steering_stage
+                    state: Generative - Bulk
+            then:
+              - type: turn_on
+                device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                entity_id: 81314d82dcd63a7d721237034016cedb
+                domain: switch
+              - delay: "{{ states('sensor.2x4_p2_irrigation_time') }}"
+              - type: turn_off
+                device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                entity_id: 81314d82dcd63a7d721237034016cedb
+                domain: switch
+              - type: turn_on
+                device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                entity_id: 4acc9ceaf69610119df87e89b3726fac
+                domain: switch
+              - delay: "{{ states('sensor.2x4_p2_irrigation_time')|int*2 }}"
+              - type: turn_off
+                device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                entity_id: 4acc9ceaf69610119df87e89b3726fac
+                domain: switch
 mode: single
 trace:
-  stored_traces: 20
+  stored_traces: 25
