@@ -29,22 +29,30 @@
 #
 # It's a bit overkill but it seems to be working. and was fun.
 
-alias: irrigation omnibus automation
-description: I was trying to make a blueprint from this but might have to make an add-on or just rethink how I handle a lot of these helpers being used as global variables.
+alias: steering - 2x4 - Irrigation Station
+description: the blueprint to the irrigation blueprint
 trigger:
-  - platform: state
-    entity_id:
-      - input_number.2x4_media_volume
-      - sensor.2x4_p2_min_wc_target
-      - input_number.2x4_drip_flow_rate
-      - input_number.2x4_plant_count
-      - counter.2x4_daily_irrigation_events
-      - sensor.2x4_p1_irrigation_time
-      - input_number.2x4_p1_shot
-      - input_number.2x4_field_capacity
-      - input_number.2x4_p2_shot
-      - input_number.2x4_p2_last_high
-    id: statetrigger
+  - platform: time
+    at: input_datetime.2x4_lights_on
+    id: lightsontrigger
+  - platform: time
+    at: input_datetime.2x4_lights_off
+    id: lightsofftrigger
+  - platform: template
+    value_template: >-
+      {{ ((states('input_number.2x4_p3_wc_at_lights_on') | float -
+      states('sensor.thcs2adjustedwc') | float)|abs >=
+      states('input_number.2x4_p0_dryback_target')|float) 
+
+      or (states('sensor.thcs2adjustedwc')|float <=
+      states('sensor.2x4_p3_target_wc')|float)
+
+      and states('switch.shelly_2_channel_1') == 'on'}} 
+    for:
+      hours: 0
+      minutes: 1
+      seconds: 0
+    id: p3trigger
   - platform: template
     value_template: >-
       {{ now().minute | int % states('input_number.2x4_p1_frequency')|int(2) ==
@@ -57,31 +65,27 @@ trigger:
       states('sensor.thcs2adjustedwc')|float <=
       states('sensor.2x4_p2_min_wc_target')|float }} 
     id: p2trigger
-  - platform: template
-    value_template: >-
-      {{ ((states('input_number.2x4_p3_wc_at_lights_on') | float - states('sensor.thcs2adjustedwc') | float)|abs >= states('input_number.2x4_p0_dryback_target')|float) or (states('sensor.thcs2adjustedwc')|float <= states('sensor.2x4_p3_target_wc')|float)
-      and states('switch.shelly_2_channel_1') == 'on'}} 
-    for:
-      hours: 0
-      minutes: 1
-      seconds: 0
-    id: p3trigger
   - platform: state
     entity_id:
       - switch.pump_valve
     to: "on"
     id: pumptrigger
-  - platform: time
-    at: input_datetime.2x4_lights_on
-    id: lightsontrigger
-  - platform: time
-    at: input_datetime.2x4_lights_off
-    id: lightsofftrigger
 condition:
   - condition: state
     entity_id: input_boolean.2x4_maintainence_mode
     state: "off"
     enabled: true
+  - condition: or
+    conditions:
+      - condition: state
+        entity_id: switch.shelly_2_channel_1
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.2x4_p3_needs_water
+        state: "on"
+      - condition: trigger
+        id:
+          - pumptrigger
 action:
   - if:
       - condition: trigger
@@ -119,6 +123,10 @@ action:
             target:
               entity_id: input_number.2x4_p3_last_dryback
             enabled: true
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.2x4_p1_at_field_capacity
+        data: {}
   - choose:
       - conditions:
           - condition: trigger
@@ -402,6 +410,24 @@ action:
             data: {}
             target:
               entity_id: switch.pump_valve
+          - if:
+              - condition: numeric_state
+                entity_id: counter.2x4_daily_irrigation_events
+                above: 2
+            then:
+              - type: turn_on
+                device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                entity_id: 4acc9ceaf69610119df87e89b3726fac
+                domain: switch
+              - delay:
+                  hours: 0
+                  minutes: 0
+                  seconds: 5
+                  milliseconds: 0
+              - type: turn_off
+                device_id: 165d74ef6224e80fc5bd4f5f8e577afa
+                entity_id: 4acc9ceaf69610119df87e89b3726fac
+                domain: switch
       - conditions:
           - condition: trigger
             id:
@@ -481,29 +507,10 @@ action:
                 device_id: 165d74ef6224e80fc5bd4f5f8e577afa
                 entity_id: 4acc9ceaf69610119df87e89b3726fac
                 domain: switch
-      - conditions:
-          - condition: trigger
-            id:
-              - statetrigger
-        sequence:
-          - service: input_number.set_value
-            data_template:
-              entity_id: input_number.2x4_total_daily_ml_estimate
-              value: >
-                {% set p2volume = states('sensor.2x4_p2_shot_volume') | float
-                %}  {% set pcount = states('input_number.2x4_plant_count') |
-                float %} {% set events =
-                states('counter.2x4_daily_irrigation_events') | float -
-                states('counter.2x4_p1_shot_count') | float %} {% set totalmlp2
-                = p2volume * pcount | float %} {% set p1totalvolume =  (
-                 (
-                  (states('input_number.2x4_drip_flow_rate') | float / 60) 
-                  *states('sensor.2x4_p1_irrigation_time') | float
-                 ) 
-                  * pcount | float
-                ) * states('counter.2x4_p1_shot_count') | float %}  {% set
-                totalmlp2d = (events) * totalmlp2 %}  {% set totalmlday =
-                p1totalvolume + totalmlp2d %} {{ totalmlday | float}}
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.2x4_p1_at_field_capacity
+            data: {}
 mode: single
 trace:
   stored_traces: 20
