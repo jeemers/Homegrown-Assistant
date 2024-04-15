@@ -1,0 +1,339 @@
+# ESPHome example using:
+# - the pH sensor from https://microfire.co/
+# - 2 relays controlling peristaltic pumps, one for ph up and one for ph down
+# - a button for calibration and adjustment
+
+# change these to your stuff 
+
+substitutions:
+  mixing_pump: "switch.4x4brain_pump_3" # thi should be the home assistant entity switch that controls your reservoir mixing pump
+  button_pin: "GPIO2" # pin the button is connected to if at all
+  ph_down_pin: "GPIO12"  # pin controlling the relay for pH down
+  ph_up_pin: "GPIO13" # pin controlling the relay for pH up
+  maintainence_entity: "input_boolean.2x4_maintainence_mode" # this entity is true whenver res is being filled or otherwise working in the tent.
+# import the mod-ph component
+external_components:
+  - source:
+      type: git
+      url: https://github.com/u-fire/ESPHomeComponents/
+
+# https://esphome.io/components/i2c.html
+# if you used the i2c pins for your board you shouldn't need to define the pins
+i2c:
+
+sensor:
+  - platform: mod_ph
+    id: ph
+    name: Current pH
+    update_interval: 15s
+    on_value:
+      then:
+        - script.execute: ph_dosing_script
+
+  - platform: uptime
+    name: Uptime
+    update_interval: 60s
+    entity_category: diagnostic
+
+  - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
+    name: "WiFi Signal dB"
+    id: wifi_signal_db
+    update_interval: 30s
+    entity_category: "diagnostic"
+
+  - platform: copy # Reports the WiFi signal strength in %
+    source_id: wifi_signal_db
+    name: "WiFi Signal Percent"
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "Signal %"
+    entity_category: "diagnostic"
+    device_class: ""
+
+button:
+  - platform: template
+    id: ph_calibrate_low
+    name: pH Calibrate Low 4.0  
+    icon: mdi:format-vertical-align-bottom
+    on_press:
+        lambda: |-
+          id(ph).calibrateLow(4.0);
+  - platform: template
+    id: ph_calibrate_mid
+    name: pH Calibrate Mid 7.0
+    icon: mdi:format-vertical-align-center
+    on_press:
+        lambda: |-
+          id(ph).calibrateMid(7.0);
+  - platform: template
+    id: ph_calibrate_high
+    name: pH Calibrate High 10.0
+    icon: mdi:format-vertical-align-top
+    on_press:
+        lambda: |-
+          id(ph).calibrateHigh(10.0);
+  - platform: template
+    id: ph_calibrate_reset
+    name: pH Calibrate Reset
+    icon: mdi:restore
+    on_press:
+        lambda: |-
+          id(ph).calibrateReset();
+  - platform: factory_reset
+    name: Restart with Factory Default Settings
+
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+      entity_category: diagnostic
+  - platform: template
+    name: "pH adjust attempts"
+    id: dose_counter_display
+    icon: mdi:tally-mark-5
+    entity_category: config
+  - platform: homeassistant
+    name: Maintainence status 
+    internal: True
+    id: maintainencemode 
+    entity_id: $maintainence_entity # this entity is true whenver res is being filled or otherwise working in the tent.
+
+number:
+  # Here we define the entities we need for ph automation
+  - platform: template
+    id: ph_goal
+    name: "pH Target"
+    icon: "mdi:ph"
+    min_value: 4.5
+    max_value: 8
+    step: 0.1
+    initial_value: 5.8
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+  - platform: template
+    id: ph_tolerance
+    name: "pH Tolerance"
+    icon: "mdi:target-variant"
+    restore_value: true
+    min_value: 0.1
+    max_value: 2
+    initial_value: 0.3
+    step: 0.1
+    optimistic: True
+    mode: box
+    entity_category: config
+
+  - platform: template
+    id: dosing_time
+    name: "Dosing Time"
+    icon: "mdi:clock-outline"
+    min_value: 1
+    max_value: 100
+    step: 1
+    initial_value: 5
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+  - platform: template
+    id: dosing_interval
+    name: "Dosing Interval"
+    icon: "mdi:calendar-clock"
+    initial_value: 5
+    min_value: 1
+    max_value: 100
+    step: 1
+    optimistic: True
+    restore_value: true
+    mode: box
+    entity_category: config
+  - platform: template
+    id: doses_max
+    name: "Max Doses"
+    icon: "mdi:numeric"
+    initial_value: 5
+    min_value: 1
+    max_value: 100
+    step: 1
+    optimistic: True
+    restore_value: true
+    mode: SLIDER
+    entity_category: config
+  - platform: template
+    id: dose_counter
+    internal: True # Hide it from the dashboard
+    name: "Dose Attempts"
+    icon: "mdi:numeric"
+    initial_value: 0
+    min_value: 0
+    max_value: 20
+    step: 1
+    mode: BOX
+    optimistic: True
+    restore_value: true
+    on_value:  # each dose attempt, we update the text sensor to show how many attemp
+      - text_sensor.template.publish:
+          id: dose_counter_display
+          state: !lambda "return {to_string(id(dose_counter).state)};"
+
+switch:
+  - platform: gpio
+    name: "pH Down"
+    id: pump1
+    pin: $ph_down_pin
+    inverted: true
+  - platform: gpio
+    name: "pH Up"
+    id: pump2
+    pin:
+      number: $ph_up_pin
+      inverted: true
+
+binary_sensor:
+  - platform: gpio
+    id: phbutton
+    pin:
+      number: $button_pin
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    name: "Dose Button"
+    internal: false
+    filters:
+      - delayed_on: 10ms
+    on_multi_click:
+    - timing:
+        - ON for at most 1s
+        - OFF for at most 0.5s
+        - ON for at most 1s
+        - OFF for at least 0.1s
+      then:
+        - logger.log: "Double Clicked"
+        - button.press: ph_calibrate_low
+    - timing:
+        - ON for at most 1s
+        - OFF for at most 0.5s
+        - ON for at most 1s
+        - OFF for at most 0.5s
+        - ON for at most 1s
+        - OFF for at least 0.1s
+      then:
+        - logger.log: "Triple Clicked"
+        - button.press: ph_calibrate_mid
+    - timing:
+        - ON for at most 1s
+        - OFF for at most 0.5s
+        - ON for at most 1s
+        - OFF for at most 0.5s
+        - ON for at most 1s
+        - OFF for at most 0.5s
+        - ON for at most 1s
+        - OFF for at least 0.1s
+      then:
+        - logger.log: "Quad Clicked"
+        - button.press: ph_calibrate_high
+    - timing:
+        - ON for at least 2s
+      then:
+        - while:
+            condition:
+              binary_sensor.is_on: phbutton
+            then:
+              - logger.log: "Single Long Clicked"
+              - script.execute: ph_dosing_script
+    - timing:
+        - ON for at most 1s
+        - OFF for at least 0.5s
+      then:
+        - logger.log: "Single Short Clicked"
+    - timing:
+        - ON for at least 1s
+        - OFF for at most 0.5s
+        - ON for at most 1s
+        - OFF for at most 0.5s
+        - ON for at least 1s
+        - OFF for at least 0.1s
+      then:
+        - logger.log: "long short long"
+script:
+  - id: ph_dosing_script
+    mode: single
+    then:
+      # Reset the dose counter
+      - number.set:
+          id: dose_counter
+          value: 0
+      # Repeat the sequence until conditions are met
+      - while:
+          # Conditions to keep repeating
+          condition:
+            # Use a lambda condition to check the pH level or dose count
+            lambda: |-
+              float ph_val = id(ph).state;
+              float ph_goal_val = id(ph_goal).state;
+              float ph_tolerance_val = id(ph_tolerance).state;
+              float dose_counter_val = id(dose_counter).state;
+              int doses_max_val = id(doses_max).state;
+
+              bool ph_low_condition = ph_val <= ph_goal_val - ph_tolerance_val;
+              bool ph_high_condition = ph_val >= ph_goal_val + ph_tolerance_val;
+              bool dose_condition = dose_counter_val < doses_max_val;
+              ESP_LOGD("ph_test", "pH value: %f, pH goal: %f, pH tolerance: %f, Dose counter: %f, Doses max: %d", ph_val, ph_goal_val, ph_tolerance_val, dose_counter_val, doses_max_val);
+              ESP_LOGD("ph_test", "pH low condition: %d, pH high condition: %d, Dose condition: %d", ph_low_condition, ph_high_condition, dose_condition);
+              if (id(maintainencemode).state == "off") {
+                if ((ph_low_condition || ph_high_condition) && dose_condition) {
+                    ESP_LOGD("ph_test", "Looks like pH needs adjusting.");
+                    return true;
+                  } else {
+                      ESP_LOGD("ph_test", "No Adjustement Needed");
+                      return false;
+                  }
+              } else { 
+                ESP_LOGD("ph_test", "Maintainence mode, No Adjustement Needed");
+                return false; 
+              }
+                    
+          # Actions to repeat
+          then:
+            # Increment the dose counter
+            - number.increment: dose_counter
+            # Choose the action based on pH level
+            - if:
+                # If pH is above target + tolerance
+                condition:
+                  - lambda: 'return id(ph).state >= id(ph_goal).state + id(ph_tolerance).state;'
+                  # Turn on pump 1
+                then:
+                  - switch.turn_on: pump1
+                  - lambda: !lambda 'ESP_LOGD("ph_test", "Turning pH Down pump on");'
+                  - homeassistant.service: 
+                      service: switch.toggle
+                      data:
+                        entity_id: ${mixing_pump}
+                    # Delay for dosing time
+                  - delay: !lambda "return id(dosing_time).state*1000;"
+                    # Turn off pump 1
+                  - switch.turn_off: pump1
+            - if:
+                # If pH is below target + tolerance
+                condition:
+                  - lambda: 'return id(ph).state <= id(ph_goal).state - id(ph_tolerance).state;'
+                  # Turn on pump 2
+                then:
+                  - switch.turn_on: pump2
+                  - lambda: !lambda 'ESP_LOGD("ph_test", "Turning pH up pump on");' 
+                  - homeassistant.service: 
+                      service: switch.toggle
+                      data:
+                        entity_id: ${mixing_pump}
+                    # Delay for dosing time
+                  - delay: !lambda "return id(dosing_time).state*1000;"
+                    # Turn off pump 2
+                  - switch.turn_off: pump2
+            # Delay between doses
+            - delay: !lambda "return id(dosing_interval).state*1000;"
+        # End of while loop
