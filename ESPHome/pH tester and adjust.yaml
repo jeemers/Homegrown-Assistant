@@ -4,7 +4,6 @@
 # - a button for calibration and adjustment
 
 # change these to your stuff 
-
 substitutions:
   mixing_pump: "switch.4x4brain_pump_3" # thi should be the home assistant entity switch that controls your reservoir mixing pump
   button_pin: "GPIO2" # pin the button is connected to if at all
@@ -156,7 +155,7 @@ number:
     icon: "mdi:numeric"
     initial_value: 5
     min_value: 1
-    max_value: 100
+    max_value: 50
     step: 1
     optimistic: True
     restore_value: true
@@ -311,7 +310,7 @@ script:
                   - switch.turn_on: pump1
                   - lambda: !lambda 'ESP_LOGD("ph_test", "Turning pH Down pump on");'
                   - homeassistant.service: 
-                      service: switch.toggle
+                      service: switch.turn_on
                       data:
                         entity_id: ${mixing_pump}
                     # Delay for dosing time
@@ -327,7 +326,7 @@ script:
                   - switch.turn_on: pump2
                   - lambda: !lambda 'ESP_LOGD("ph_test", "Turning pH up pump on");' 
                   - homeassistant.service: 
-                      service: switch.toggle
+                      service: switch.turn_on
                       data:
                         entity_id: ${mixing_pump}
                     # Delay for dosing time
@@ -336,5 +335,11 @@ script:
                   - switch.turn_off: pump2
             # Delay between doses
             - delay: !lambda "return id(dosing_interval).state*1000;"
-      - delay: !lambda "return id(dosing_interval).state*10000;" #delay for 10x the mixing delay before ending the script to prevent re-dose attempts too quickly
+            - homeassistant.service: 
+                service: switch.turn_off
+                data:
+                  entity_id: ${mixing_pump}
+              # Delay for dosing time
+            - delay: !lambda "return id(dosing_time).state*1000;"
+      - delay: !lambda "return id(dosing_interval).state*10000;" #delay for 10x the interval before ending the script to prevent re-dose attempts too quickly
         # End of while loop
