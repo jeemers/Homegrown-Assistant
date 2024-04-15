@@ -336,4 +336,5 @@ script:
                   - switch.turn_off: pump2
             # Delay between doses
             - delay: !lambda "return id(dosing_interval).state*1000;"
+      - delay: !lambda "return id(dosing_interval).state*10000;" #delay for 10x the mixing delay before ending the script to prevent re-dose attempts too quickly
         # End of while loop
