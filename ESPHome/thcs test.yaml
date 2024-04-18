@@ -1,0 +1,481 @@
+#This is probably a bad idea :v
+substitutions: #not used yet
+  switch_light: "switch.shelly_2_channel_1" # Light entity for the room, as of yet unused
+  switch_irrigation_pump: "switch.pump_valve" # irrigation pump that gets this sensor wet
+  datetime_lights_on: "input_datetime.2x4_lights_on" # lights on time for the zone this sensor is in
+  datetime_lights_off: "input_datetime.2x4_lights_off" # if you dont have these, you can add em in here somewhere
+  datetime_p2window_close: "input_datetime.2x4_p2_window_close" # this is the last point during the day an irrigation event should happen
+  boolean_maintainance_mode: "input_boolean.2x4_maintainence_mode" # maintainence mode switch that prevents automations from happening when trying to work on the system
+
+### RS485
+uart:
+  id: modbus_serial
+  rx_pin: 12
+  tx_pin: 13
+  baud_rate: 4800
+  stop_bits: 1
+ 
+modbus:
+  id: modbus1
+  uart_id: modbus_serial
+ 
+modbus_controller:
+  - id: con_modbus_name
+    update_interval: 20s
+    address: 0x1
+    command_throttle: 100ms
+    setup_priority: -10
+ 
+sensor:
+  - platform: modbus_controller
+    name: "Moisture"
+    id: WC
+    address: 0x0000
+    unit_of_measurement: "%"
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+      lambda: return (x / 10);
+    state_class: measurement
+  - platform: modbus_controller
+    name: "Temp"
+    id: C
+    address: 0x0001
+    unit_of_measurement: "°C"
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+      lambda: |-
+        float fahrenheit = x / 10;
+        //ESP_LOGD("TEMP_SENSOR", "Temperature in Fahrenheit: %.2f", fahrenheit);
+        float celsius = (fahrenheit - 32) / 1.8;
+        //ESP_LOGD("TEMP_SENSOR", "Temperature in Celsius: %.2f", celsius);
+        return celsius;
+    state_class: measurement
+  - platform: modbus_controller
+    name: "Conductivity"
+    id: EC
+    address: 0x0002
+    unit_of_measurement: "ms/cm"
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+      lambda: return x;
+    state_class: measurement
+  - platform: modbus_controller
+    name: "TDS"
+    id: TDS
+    address: 0x0004
+    unit_of_measurement: "ppm"
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+      lambda: return x;
+    state_class: measurement
+
+  - platform: template
+    name: "VWC"
+    internal: False
+    id: VWC
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: |-
+      float soil_hum = id(WC).state;
+      float adjusted_vwc = -0.0020844495456097786 * soil_hum * soil_hum + 0.8758395803818368 * soil_hum - 0.007765958483453483;
+      return adjusted_vwc;
+    state_class: measurement
+    unit_of_measurement: "%"
+  - platform: template
+    name: "pwEC"
+    id: pw_ec
+    state_class: measurement
+    unit_of_measurement: "ms/cm"
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: |-
+      float soil_ec = id(EC).state;
+      float soil_temp = id(C).state;
+      float soil_hum = id(WC).state;
+      //soil_ec = 1.93 * soil_ec - 270.8;
+      soil_ec = 0.0000014403 * soil_ec * soil_ec * soil_ec - 0.0036 * soil_ec * soil_ec + 3.7525 * soil_ec - 814.1833;
+      /**
+      * Bulk EC temperature correction. Test and use if necessary.
+      */
+      // Soil EC temp correction based on the Teros 12 manual. https://github.com/kromadg/soil-sensor/issues/1
+      soil_ec = soil_ec / (1.0 + 0.019 * (soil_temp - 25));
+      // the teros bulk_permittivity was calculated from the teros temperature, teros bulk ec and teros pwec by Hilhorst 2000 model
+      float soil_apparent_dieletric_constant = 1.3088 + 0.1439 * soil_hum + 0.0076 * soil_hum * soil_hum;
+
+      float soil_bulk_permittivity = soil_apparent_dieletric_constant;  /// Hamed 2015 (apparent_dieletric_constant is the real part of permittivity)
+      float soil_pore_permittivity = 80.3 - 0.37 * (soil_temp - 20); /// same as water 80.3 and corrected for temperature
+
+      // converting bulk EC to pore water EC
+      float soil_pw_ec;
+      if (soil_bulk_permittivity > 4.1)
+          soil_pw_ec = ((soil_pore_permittivity * soil_ec) / (soil_bulk_permittivity - 4.1) / 1000); /// from Hilhorst 2000.
+      else
+          soil_pw_ec = 0;
+      return soil_pw_ec;
+  - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
+    name: "WiFi Signal dB"
+    id: wifi_signal_db
+    update_interval: 60s
+    entity_category: "diagnostic"
+
+  - platform: copy # Reports the WiFi signal strength in %
+    source_id: wifi_signal_db
+    name: "WiFi Signal Percent"
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "Signal %"
+    entity_category: "diagnostic"
+    device_class: ""
+  - platform: uptime
+    name: Uptime
+    update_interval: 60s
+    entity_category: diagnostic
+
+  - platform: template
+    id: p1_irrigation_time
+    name: "p1 Irrigation Time"
+    icon: "mdi:clock-outline"
+    lambda: |-
+      float dryback_target = (id(p1_shot_size).state) / 100;
+      float media_volume_liters = id(media_volume).state * 3.78541;
+      float water_holding_capacity = 0.667;
+      float water_capacity_liters = media_volume_liters * water_holding_capacity;
+      float dryback_percent_water_liters = water_capacity_liters * dryback_target;
+      float dryback_percent_water_ml = dryback_percent_water_liters * 1000;
+      float pump_run_time_seconds = dryback_percent_water_ml / (id(drip_rate).state / 60);
+      return pump_run_time_seconds;
+  - platform: template
+    id: p1_shot_volume
+    name: "p1 Shot Volume Target"
+    icon: "mdi:clock-outline"
+    lambda: |-
+      float shot_target = (id(p1_shot_size).state) / 100;
+      float media_volume_gallons = id(media_volume).state;
+      float media_volume_liters = media_volume_gallons * 3.78541;
+      float water_holding_capacity = 0.66;
+      float water_capacity_liters = media_volume_liters * water_holding_capacity;
+      float shot_percent_water_liters = water_capacity_liters * shot_target;
+      float shot_percent_water_ml = shot_percent_water_liters * 1000;
+      return shot_percent_water_ml;
+
+  - platform: template
+    id: p1_runoff_wc
+    name: "p1 Runoff WC"
+    icon: "mdi:water-percent"
+   
+  - platform: template
+    id: p2_irrigation_time
+    name: "p2 Irrigation Time"
+    icon: "mdi:clock-outline"
+    lambda: |-
+      float dryback_target = (id(p2_shot_size).state) / 100;
+      float media_volume_liters = id(media_volume).state * 3.78541;
+      float water_holding_capacity = 0.667;
+      float water_capacity_liters = media_volume_liters * water_holding_capacity;
+      float dryback_percent_water_liters = water_capacity_liters * dryback_target;
+      float dryback_percent_water_ml = dryback_percent_water_liters * 1000;
+      float pump_run_time_seconds = dryback_percent_water_ml / (id(drip_rate).state / 60);
+      return pump_run_time_seconds;
+  - platform: template
+    id: p2_shot_volume
+    name: "p2 Shot Volume Target"
+    icon: "mdi:clock-outline"
+    lambda: |-
+      float shot_target = (id(p2_shot_size).state) / 100;
+      float media_volume_gallons = id(media_volume).state;
+      float media_volume_liters = media_volume_gallons * 3.78541;
+      float water_holding_capacity = 0.66;
+      float water_capacity_liters = media_volume_liters * water_holding_capacity;
+      float shot_percent_water_liters = water_capacity_liters * shot_target;
+      float shot_percent_water_ml = shot_percent_water_liters * 1000;
+      return shot_percent_water_ml;
+
+  - platform: template
+    id: p2_min_wc_target
+    name: "p2 Min WC Target"
+    icon: "mdi:water-percent"
+    lambda: |-
+      if (id(steering_phase).state == "Vegetative - Veg" || id(steering_phase).state == "Vegetative - bulk") {
+        return (id(p1_runoff_wc).state - id(p2_dryback_target).state);
+      } else {
+        return (id(field_capacity).state - id(p2_dryback_target).state);
+      }
+
+  - platform: template
+    id: p3_end_wc
+    name: "p3 End WC"
+    icon: "mdi:water-percent"
+
+  - platform: template
+    id: p3_last_dryback
+    name: "p3 Last Dryback"
+    icon: "mdi:water-percent"
+    lambda: return id(p3_start_wc).state - id(p3_end_wc).state;
+  - platform: template
+    id: p3_start_wc
+    name: "p3 Start WC"
+    icon: "mdi:water-percent"
+
+  - platform: template
+    id: p3_wc_at_lights_on
+    name: "p3 WC at Lights On"
+    icon: "mdi:lightbulb-on-outline"
+
+  - platform: template
+    id: currentdryback
+    name: "Current Dryback"
+    icon: "mdi:water-percent"
+
+  - platform: template
+    id: field_capacity
+    name: "Field Capacity"
+    icon: "mdi:water-percent"
+
+  - platform: template
+    id: last_dryback
+    name: "Last Dryback"
+    icon: "mdi:water-percent"
+
+  - platform: template
+    id: last_high
+    name: "Last High"
+    icon: "mdi:arrow-up-bold-circle-outline"
+
+  - platform: template
+    id: last_low
+    name: "Last Low"
+    icon: "mdi:arrow-down-bold-circle-outline"
+
+  - platform: template
+    id: p3_target_wc
+    name: "p3 Target WC"
+    icon: "mdi:water-percent"
+    lambda: |-
+      return id(field_capacity).state - (id(field_capacity).state*(id(p3_dryback_target).state/100));
+    
+text_sensor:
+  - platform: template
+    name: "P1 Shots"
+    id: p1_shot_count_display
+    icon: mdi:tally-mark-5
+    entity_category: config
+
+binary_sensor:
+  - platform: template 
+    id: p3_needs_water
+    name: "P3 Needs Water"
+    lambda: |-
+      if (id(VWC).state <= id(p3_vwc_low_limit).state) {
+        return true;
+      } else {
+        return false;
+      }
+  - platform: template
+    id: p1_at_field_capacity
+    name: "At Field Capacity"
+    
+  
+datetime:
+  - platform: template
+    id: my_time
+    type: time
+    name: Pick a Time
+    optimistic: yes
+    initial_value: "12:34:56"
+    restore_value: true
+    icon: "mdi:calendar-alert"
+
+select:
+  - platform: template
+    name: "Steering Phase"
+    id: steering_phase
+    options:
+     - "Vegetative - Veg"
+     - "Generative - Flip"
+     - "Vegetative - Bulk"
+     - "Generative - Finish"
+    initial_option: "Vegetative - Veg"
+    optimistic: true
+  - platform: template
+    name: "Irrigation Phase"
+    id: irrigation_phase
+    options:
+     - "P0"
+     - "P1"
+     - "P2"
+     - "P3"
+    initial_option: "P3"
+    optimistic: True
+    
+    
+    
+number:
+  - platform: template
+    id: media_volume
+    name: "Media Volume"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 10
+    initial_value: 2
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "Gallons"
+  - platform: template
+    id: drip_rate
+    name: "Drip Rate"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 10
+    initial_value: 3
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: ml/minute   
+  - platform: template
+    id: p0_dryback_target
+    name: "p0 Dryback Target"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 10
+    initial_value: 3
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p1_frequency
+    name: "P1 Frequency"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 60
+    initial_value: 15
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config 
+    unit_of_measurement: minutes
+  - platform: template
+    id: p1_shot_size
+    name: "p1 Shot %"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 25
+    initial_value: 5
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p1_target_shots
+    name: "p1 Target Shots"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 16
+    initial_value: 5
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p1_shot_count
+    name: "p1 Shots"
+    internal: true
+    min_value: 0
+    max_value: 33
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    on_value:  # each shot, we update the text sensor to show how many shots
+      - text_sensor.template.publish:
+          id: p1_shot_count_display
+          state: !lambda "return {to_string(id(p1_shot_count).state)};"
+  - platform: template
+    id: p2_ec_target
+    name: "p2 EC Target"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 100
+    initial_value: 3.0
+    step: 0.1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "EC"
+
+  - platform: template
+    id: p2_dryback_target
+    name: "p2 Dryback Target"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p2_shot_size
+    name: "p2 Shot Size"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+    
+  - platform: template
+    id: p3_dryback_target
+    name: "p3 Dryback Target"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p3_vwc_low_limit
+    name: "p3 VWC Low Limit"
+    icon: "mdi:alert-octagon"
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config   
+    unit_of_measurement: "%"
+    
+    
