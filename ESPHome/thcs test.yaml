@@ -33,13 +33,6 @@ sensor:
     register_type: holding
     value_type: U_WORD
     accuracy_decimals: 1
-    filters:  # My sensor seems broken and is spitting out what seeoms to be F not C so I convert. Remove this
-      lambda: |- 
-        float fahrenheit = x / 10;
-        //ESP_LOGD("TEMP_SENSOR", "Temperature in Fahrenheit: %.2f", fahrenheit);
-        float celsius = (fahrenheit - 32) / 1.8;
-        //ESP_LOGD("TEMP_SENSOR", "Temperature in Celsius: %.2f", celsius);
-        return celsius;
     state_class: measurement
 # Raw conductivity from the THCS, used for pwEC calculatiions
   - platform: modbus_controller
