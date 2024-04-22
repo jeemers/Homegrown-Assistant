@@ -177,7 +177,7 @@ sensor:
     id: p1_runoff_wc
     name: "p1 Runoff WC"
     icon: "mdi:water-percent"
-    disabled_by_default: true
+
 # This sensor is the same as the previous one but for our P2 shots
   - platform: template
     id: p2_irrigation_time
@@ -226,7 +226,6 @@ sensor:
     id: p3_end_wc
     name: "P3 End VWC"
     icon: "mdi:water-percent"
-    disabled_by_default: True
 
 # P3 Last dryback will be calculated each morning as soon as P1 starts, based on start and end p3 vwc
   - platform: template
