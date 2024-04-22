@@ -33,6 +33,13 @@ sensor:
     register_type: holding
     value_type: U_WORD
     accuracy_decimals: 1
+    filters:  # My sensor seems broken and is spitting out what seeoms to be F not C so I convert. Remove this
+      lambda: |- 
+        float fahrenheit = x / 10;
+        //ESP_LOGD("TEMP_SENSOR", "Temperature in Fahrenheit: %.2f", fahrenheit);
+        float celsius = (fahrenheit - 32) / 1.8;
+        //ESP_LOGD("TEMP_SENSOR", "Temperature in Celsius: %.2f", celsius);
+        return celsius;
     state_class: measurement
 # Raw conductivity from the THCS, used for pwEC calculatiions
   - platform: modbus_controller
@@ -170,7 +177,7 @@ sensor:
     id: p1_runoff_wc
     name: "p1 Runoff WC"
     icon: "mdi:water-percent"
-
+    disabled_by_default: true
 # This sensor is the same as the previous one but for our P2 shots
   - platform: template
     id: p2_irrigation_time
@@ -219,6 +226,7 @@ sensor:
     id: p3_end_wc
     name: "P3 End VWC"
     icon: "mdi:water-percent"
+    disabled_by_default: True
 
 # P3 Last dryback will be calculated each morning as soon as P1 starts, based on start and end p3 vwc
   - platform: template
@@ -239,7 +247,11 @@ sensor:
     name: "P3 WC at Lights On"
     icon: "mdi:lightbulb-on-outline"
     internal: True
-
+  - platform: template
+    id: p3_wc_at_lights_off
+    name: "P3 WC at Lights On"
+    icon: "mdi:lightbulb-on-outline"
+    internal: True
 # The current value of dryback from last known high value til now.
   - platform: template
     id: currentdryback
@@ -254,7 +266,7 @@ sensor:
     name: "Field Capacity"
     icon: "mdi:water-percent"
 
-# This will get updated everytime VWC updates, if current VCW is > this value.
+# This will get updated everytime VWC updates, if current VWC is > this value.
 # It will also get reset between irrigations, so we can track each dryback and irrigation event
   - platform: template
     id: last_high
@@ -275,7 +287,23 @@ sensor:
     icon: "mdi:water-percent"
     lambda: |-
       return id(last_high).state - id(p3_dryback_target).state;
-    
+
+# lets estimate how much water we use throughout the day
+# First we are going to multiple P1 shot count * plant count * p1 shot volume
+# Then we do P2 shot time * plant count * (daily shot count - p1 shot count)
+# Then add those together. 
+  - platform: template
+    id: total_daily_ml_estimate
+    name: "Daily ml use estimate"
+    icon: "mdi:water-check"
+    lambda: |-
+      float totalmlp1 = (id(p1_shot_volume).state * id(plant_count).state) * id(p1_shot_count).state;
+      float p2events = id(daily_irrigation_events).state - id(p1_shot_count).state;
+      float totalmlp2 = (id(p2_shot_volume).state * id(plant_count).state) * p2events;
+      float totalmlday = totalmlp1 + totalmlp2;
+      return totalmlday / 1000.0;
+
+
 text_sensor:
   - platform: wifi_info
     ip_address:
@@ -288,7 +316,12 @@ text_sensor:
     id: p1_shot_count_display
     icon: mdi:tally-mark-5
     entity_category: config
-
+# same but for daily total shots
+  - platform: template
+    name: "Daily Shots"
+    id: daily_shot_count_display
+    icon: mdi:tally-mark-5
+    entity_category: config
 # Here we define our maintainence mode variable. This can be made into an internal boolean instead if dont already have this in HA. but i like it betteri n HA.
   - platform: homeassistant
     name: 4x4 Maintainence status
@@ -372,7 +405,81 @@ time:
           strftime(str, sizeof(str), "%H:%M:%S", localtime(&currTime));
           if (str == to_string(id(lights_on_time).state)) { // Compare strings using strcmp
             ESP_LOGD("main", "This would be lights on");
+            id(lightsonscript).execute();
           }
           if (str == to_string(id(lights_off_time).state)) { // Compare strings using strcmp
             ESP_LOGD("main", "This would be lights off");
+            id(lightsoffscript).execute();
           }
+
+script:
+- id: lightsonscript
+  mode: single
+  then:
+    lambda: |-
+      // set p3 lights on from current VWC
+      id(p3_wc_at_lights_on).publish_state(id(VWC).state);
+
+      // reset last low, last high, field capacity, and runoff wc to 35
+      id(last_low).publish_state(35);
+      id(last_high).publish_state(35);
+      id(p1_runoff_wc).publish_state(35);
+      id(field_capacity).publish_state(35);
+
+      // Reset the counters
+      id(daily_irrigation_events).make_call().number_to_min();
+      id(p1_shot_count).make_call().number_to_min();
+
+      // Set the value 0 to a specific input_number
+      id(total_daily_ml_estimate).publish_state(0);
+
+      // Turn off the input_boolean
+      id(p1_at_field_capacity).publish_state(false);
+
+      // Set irrigation phase to P0
+      id(irrigation_phase).make_call().set_option("P0");
+
+- id: lightsoffscript
+  mode: single
+  then:
+    lambda: |-
+      id(p3_wc_at_lights_off).publish_state(id(VWC).state);
+      id(p3_start_wc).publish_state(id(last_high).state);
+      id(irrigation_phase).make_call().set_option("P3");
+      id(p1_shot_count).make_call().number_to_min();
+      id(p1_at_field_capacity).publish_state(false);
+- id: vwc_check
+  mode: single
+  then:
+    - if:
+        condition: #Check if current VWC
+          lambda: 'return id(VWC).state > id(last_high).state;'
+        then:  
+          - sensor.template.publish:
+              id: last_high
+              state: !lambda 'return id(VWC).state;'
+    - if:
+        condition: #Check if current VWC is lower than last low
+          lambda: 'return id(VWC).state < id(last_low).state;'
+        then:  
+          - sensor.template.publish:
+              id: last_low
+              state: !lambda 'return id(VWC).state;'
+    - if:
+        condition: #Check if we are set to P0
+          lambda: 'return id(irrigation_phase).state.c_str() == "P0";'
+        then:
+          - logger.log: "It's P0, checking if we should start P1..."
+          - if:
+              condition: # Check if P0 dryback or P3 dryback was hit
+                lambda: 'return ((id(p3_wc_at_lights_on).state - id(VWC).state >= id(p0_dryback_target).state ) || (id(currentdryback).state >= id(p3_dryback_target).state));' 
+              then:
+                - logger.log: "Looks like p0 or p3 dryback was met, starting P1."
+                - select.set:
+                    id: irrigation_phase
+                    option: "P1"
+    - if:
+        condition: # Check if we are set to P1
+          lambda: 'return id(irrigation_phase).state.c_str() == "P1";'
+        then:
+          # here we will start the P1 script, and hopefulyl this process terminates so it can keep exectuing
