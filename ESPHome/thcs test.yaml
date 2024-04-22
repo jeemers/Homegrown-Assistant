@@ -1,34 +1,20 @@
-#This is probably a bad idea :v
-substitutions: #not used yet
-  switch_light: "switch.shelly_2_channel_1" # Light entity for the room, as of yet unused
-  switch_irrigation_pump: "switch.pump_valve" # irrigation pump that gets this sensor wet
-  datetime_lights_on: "input_datetime.2x4_lights_on" # lights on time for the zone this sensor is in
-  datetime_lights_off: "input_datetime.2x4_lights_off" # if you dont have these, you can add em in here somewhere
-  datetime_p2window_close: "input_datetime.2x4_p2_window_close" # this is the last point during the day an irrigation event should happen
-  boolean_maintainance_mode: "input_boolean.2x4_maintainence_mode" # maintainence mode switch that prevents automations from happening when trying to work on the system
 
-### RS485
-uart:
-  id: modbus_serial
-  rx_pin: 12
-  tx_pin: 13
-  baud_rate: 4800
-  stop_bits: 1
- 
-modbus:
-  id: modbus1
-  uart_id: modbus_serial
- 
-modbus_controller:
-  - id: con_modbus_name
-    update_interval: 20s
-    address: 0x1
-    command_throttle: 100ms
-    setup_priority: -10
+substitutions:
+  switch_light: "switch.mini_plug_3"
+  switch_irrigation_pump: "switch.pump_valve"
+  datetime_lights_on: "input_datetime.4x4_lights_on"
+  datetime_lights_off: "input_datetime.4x4_lights_off"
+  datetime_p2window_close: "input_datetime.4x4_p2_window_close"
+  boolean_maintainance_mode: "input_boolean.4x4_maintainence_mode"
+  uart_tx_pin: "12" # This is the TX pin the RS485 adapter is connected to
+  uart_rx_pin: "13" # This is the RX pin the RS485 adapter is conencted to
+
+<<: !include addons/thcs-config.yaml  # This file has the UART settings, and number variables in it
  
 sensor:
+# Raw moisture from 0-100 from the sensor
   - platform: modbus_controller
-    name: "Moisture"
+    name: "Moisture"  
     id: WC
     address: 0x0000
     unit_of_measurement: "%"
@@ -38,24 +24,26 @@ sensor:
     filters:
       lambda: return (x / 10);
     state_class: measurement
+# Temp in C from the THCS  
   - platform: modbus_controller
-    name: "Temp"
+    name: "Temp" 
     id: C
     address: 0x0001
     unit_of_measurement: "°C"
     register_type: holding
     value_type: U_WORD
     accuracy_decimals: 1
-    filters:
-      lambda: |-
+    filters:  # My sensor seems broken and is spitting out what seeoms to be F not C so I convert. Remove this
+      lambda: |- 
         float fahrenheit = x / 10;
         //ESP_LOGD("TEMP_SENSOR", "Temperature in Fahrenheit: %.2f", fahrenheit);
         float celsius = (fahrenheit - 32) / 1.8;
         //ESP_LOGD("TEMP_SENSOR", "Temperature in Celsius: %.2f", celsius);
         return celsius;
     state_class: measurement
+# Raw conductivity from the THCS, used for pwEC calculatiions
   - platform: modbus_controller
-    name: "Conductivity"
+    name: "Conductivity"  
     id: EC
     address: 0x0002
     unit_of_measurement: "ms/cm"
@@ -65,8 +53,10 @@ sensor:
     filters:
       lambda: return x;
     state_class: measurement
+# This is a "TDS" output from the sensor in PPM, not sure what conversion or accuracy.    
   - platform: modbus_controller
-    name: "TDS"
+    name: "TDS"  
+    disabled_by_default: True  # user has to enable it first
     id: TDS
     address: 0x0004
     unit_of_measurement: "ppm"
@@ -77,8 +67,9 @@ sensor:
       lambda: return x;
     state_class: measurement
 
+# This template is estimating the VWC based on raw moisture and a 66.7% VWC Coco coir
   - platform: template
-    name: "VWC"
+    name: "VWC"  
     internal: False
     id: VWC
     accuracy_decimals: 1
@@ -89,6 +80,8 @@ sensor:
       return adjusted_vwc;
     state_class: measurement
     unit_of_measurement: "%"
+
+#  This calculation is gettin the pore water EC based on the hilhorst method, calibrated for coco
   - platform: template
     name: "pwEC"
     id: pw_ec
@@ -120,12 +113,13 @@ sensor:
       else
           soil_pw_ec = 0;
       return soil_pw_ec;
+
+# Some wifi sensors
   - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
     name: "WiFi Signal dB"
     id: wifi_signal_db
     update_interval: 60s
     entity_category: "diagnostic"
-
   - platform: copy # Reports the WiFi signal strength in %
     source_id: wifi_signal_db
     name: "WiFi Signal Percent"
@@ -134,14 +128,23 @@ sensor:
     unit_of_measurement: "Signal %"
     entity_category: "diagnostic"
     device_class: ""
-  - platform: uptime
+# reports uptime
+  - platform: uptime  
     name: Uptime
     update_interval: 60s
     entity_category: diagnostic
 
+
+# For P1 and P2 Irrigation times, we take:
+#  - the media volume
+#  - the flow rate of our drippers. how much water each plant gets per minute, scale this with how many drippers per plant.
+#  - the max VWC, in this case 66.7%
+#  - the target shot % size
+# And we calculate how many ml of water that target shot % should be,
+# and how many seconds we should run the pump to reach that target ml of water
   - platform: template
     id: p1_irrigation_time
-    name: "p1 Irrigation Time"
+    name: "P1 Irrigation Time"
     icon: "mdi:clock-outline"
     lambda: |-
       float dryback_target = (id(p1_shot_size).state) / 100;
@@ -152,28 +155,33 @@ sensor:
       float dryback_percent_water_ml = dryback_percent_water_liters * 1000;
       float pump_run_time_seconds = dryback_percent_water_ml / (id(drip_rate).state / 60);
       return pump_run_time_seconds;
+
+# The P1/P2 Shot volume targets are calculated the same way as the irrigation time, just returns the volume of water in ml
   - platform: template
     id: p1_shot_volume
-    name: "p1 Shot Volume Target"
+    name: "P1 Shot Volume Target"
     icon: "mdi:clock-outline"
     lambda: |-
       float shot_target = (id(p1_shot_size).state) / 100;
       float media_volume_gallons = id(media_volume).state;
       float media_volume_liters = media_volume_gallons * 3.78541;
-      float water_holding_capacity = 0.66;
+      float water_holding_capacity = 0.667;
       float water_capacity_liters = media_volume_liters * water_holding_capacity;
       float shot_percent_water_liters = water_capacity_liters * shot_target;
       float shot_percent_water_ml = shot_percent_water_liters * 1000;
       return shot_percent_water_ml;
 
+# This sensor will end up being the highest VWC we get to in P1 between irrigation spikes.
+# It will be the value our p2 dryback target vwc% will be based on, p1 runoff wc - p2 dryback target. For vegetative phases.
   - platform: template
     id: p1_runoff_wc
     name: "p1 Runoff WC"
     icon: "mdi:water-percent"
-   
+    disabled_by_default: true
+# This sensor is the same as the previous one but for our P2 shots
   - platform: template
     id: p2_irrigation_time
-    name: "p2 Irrigation Time"
+    name: "P2 Irrigation Time"
     icon: "mdi:clock-outline"
     lambda: |-
       float dryback_target = (id(p2_shot_size).state) / 100;
@@ -186,7 +194,7 @@ sensor:
       return pump_run_time_seconds;
   - platform: template
     id: p2_shot_volume
-    name: "p2 Shot Volume Target"
+    name: "P2 Shot Volume Target" # Same as P1
     icon: "mdi:clock-outline"
     lambda: |-
       float shot_target = (id(p2_shot_size).state) / 100;
@@ -198,9 +206,13 @@ sensor:
       float shot_percent_water_ml = shot_percent_water_liters * 1000;
       return shot_percent_water_ml;
 
+# For the P2 minimum VWC target sensor, depending on whether we are vegetative or generative,
+# we aim for a dryback either from the maximum VWC during P1, so we can stay within runoff territory and keep EC lowering shot to shot
+# Or from the base VWC we detected as field capacity by the end of P1. instead of from runoff VWC,
+# This enables us to just stay at or under field capacity and let the pwEC rise as VWC gets lower.
   - platform: template
     id: p2_min_wc_target
-    name: "p2 Min WC Target"
+    name: "P2 Min VWC Target"
     icon: "mdi:water-percent"
     lambda: |-
       if (id(steering_phase).state == "Vegetative - Veg" || id(steering_phase).state == "Vegetative - bulk") {
@@ -209,66 +221,104 @@ sensor:
         return (id(field_capacity).state - id(p2_dryback_target).state);
       }
 
+# This will just be the VWC P3 ends at, either because we reached P0 dryback goal or P3 dryback goal
   - platform: template
     id: p3_end_wc
-    name: "p3 End WC"
+    name: "P3 End VWC"
     icon: "mdi:water-percent"
+    disabled_by_default: True
 
+# P3 Last dryback will be calculated each morning as soon as P1 starts, based on start and end p3 vwc
   - platform: template
     id: p3_last_dryback
-    name: "p3 Last Dryback"
+    name: "P3 Last Dryback"
     icon: "mdi:water-percent"
     lambda: return id(p3_start_wc).state - id(p3_end_wc).state;
+
+# Will be set at lights off to the last high VWC value after the most recent irrigation
   - platform: template
     id: p3_start_wc
-    name: "p3 Start WC"
+    name: "P3 Start WC"
     icon: "mdi:water-percent"
 
+# VWC at lights on, so we know when we hit the P0 dryback goal
   - platform: template
     id: p3_wc_at_lights_on
-    name: "p3 WC at Lights On"
+    name: "P3 WC at Lights On"
     icon: "mdi:lightbulb-on-outline"
+    internal: True
 
+# The current value of dryback from last known high value til now.
   - platform: template
     id: currentdryback
     name: "Current Dryback"
     icon: "mdi:water-percent"
+    lambda: return id(last_high).state - id(VWC).state;
 
+# This is going to be set in the P1 script once it detects field capacity,
+# It presumes field capacity once the VWC at time of P1 irrigation is less than 2% from VWC at previous irrigation 
   - platform: template
     id: field_capacity
     name: "Field Capacity"
     icon: "mdi:water-percent"
 
-  - platform: template
-    id: last_dryback
-    name: "Last Dryback"
-    icon: "mdi:water-percent"
-
+# This will get updated everytime VWC updates, if current VCW is > this value.
+# It will also get reset between irrigations, so we can track each dryback and irrigation event
   - platform: template
     id: last_high
     name: "Last High"
     icon: "mdi:arrow-up-bold-circle-outline"
-
+    internal: true
+# Similar to last high except gets set at each irrigation event.
   - platform: template
     id: last_low
     name: "Last Low"
     icon: "mdi:arrow-down-bold-circle-outline"
+    internal: True
 
+# We calculate our target P3 VWC based on subtracting our P3 dryback target % from our last high VWC value
   - platform: template
     id: p3_target_wc
-    name: "p3 Target WC"
+    name: "P3 Target WC"
     icon: "mdi:water-percent"
     lambda: |-
-      return id(field_capacity).state - (id(field_capacity).state*(id(p3_dryback_target).state/100));
+      return id(last_high).state - id(p3_dryback_target).state;
     
 text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+      entity_category: diagnostic
+
+# This is just a text sensor that will update each time we irrigate
   - platform: template
     name: "P1 Shots"
     id: p1_shot_count_display
     icon: mdi:tally-mark-5
     entity_category: config
 
+# Here we define our maintainence mode variable. This can be made into an internal boolean instead if dont already have this in HA. but i like it betteri n HA.
+  - platform: homeassistant
+    name: 4x4 Maintainence status
+    internal: False
+    entity_id: ${boolean_maintainance_mode}
+
+# we need to know what time lights on and lights of is to start P0 and get the day started.
+  - platform: homeassistant
+    name: Lights On
+    id: lights_on_time
+    internal: false
+    entity_id: ${datetime_lights_on}
+  - platform: homeassistant
+    name: Lights Off
+    id: lights_off_time
+    internal: false
+    entity_id: ${datetime_lights_off}
+
+
 binary_sensor:
+# This sensor checks if the current VWC is lower than the "VWC too low" setting 
+# and will return true and eventually call an emergency irrigation if its during lights off, in order to prevent wilting overnight.
   - platform: template 
     id: p3_needs_water
     name: "P3 Needs Water"
@@ -278,21 +328,15 @@ binary_sensor:
       } else {
         return false;
       }
+
+# This is going to be set true by the P1 script once it hits field capacity.
   - platform: template
     id: p1_at_field_capacity
     name: "At Field Capacity"
     
-  
-datetime:
-  - platform: template
-    id: my_time
-    type: time
-    name: Pick a Time
-    optimistic: yes
-    initial_value: "12:34:56"
-    restore_value: true
-    icon: "mdi:calendar-alert"
-
+# Here We define the steering and irrgation phases.
+# Steering phases will change as the grow progresses,
+# And irrigation phases change as the day progresses.
 select:
   - platform: template
     name: "Steering Phase"
@@ -314,168 +358,29 @@ select:
      - "P3"
     initial_option: "P3"
     optimistic: True
-    
-    
-    
-number:
-  - platform: template
-    id: media_volume
-    name: "Media Volume"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 10
-    initial_value: 2
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: "Gallons"
-  - platform: template
-    id: drip_rate
-    name: "Drip Rate"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 10
-    initial_value: 3
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: ml/minute   
-  - platform: template
-    id: p0_dryback_target
-    name: "p0 Dryback Target"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 10
-    initial_value: 3
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: "%"
-  - platform: template
-    id: p1_frequency
-    name: "P1 Frequency"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 60
-    initial_value: 15
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config 
-    unit_of_measurement: minutes
-  - platform: template
-    id: p1_shot_size
-    name: "p1 Shot %"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 25
-    initial_value: 5
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: "%"
-  - platform: template
-    id: p1_target_shots
-    name: "p1 Target Shots"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 16
-    initial_value: 5
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: "%"
-  - platform: template
-    id: p1_shot_count
-    name: "p1 Shots"
-    internal: true
-    min_value: 0
-    max_value: 33
-    initial_value: 0
-    step: 1
-    restore_value: true
-    optimistic: True
-    on_value:  # each shot, we update the text sensor to show how many shots
-      - text_sensor.template.publish:
-          id: p1_shot_count_display
-          state: !lambda "return {to_string(id(p1_shot_count).state)};"
-  - platform: template
-    id: p2_ec_target
-    name: "p2 EC Target"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 100
-    initial_value: 3.0
-    step: 0.1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: "EC"
+# To-Do: add a selector for media type selection to affect VWC and pwEC calibrations
 
-  - platform: template
-    id: p2_dryback_target
-    name: "p2 Dryback Target"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 100
-    initial_value: 0
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: "%"
-  - platform: template
-    id: p2_shot_size
-    name: "p2 Shot Size"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 100
-    initial_value: 0
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: "%"
-    
-  - platform: template
-    id: p3_dryback_target
-    name: "p3 Dryback Target"
-    icon: "mdi:water-percent"
-    min_value: 0
-    max_value: 100
-    initial_value: 0
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config
-    unit_of_measurement: "%"
-  - platform: template
-    id: p3_vwc_low_limit
-    name: "p3 VWC Low Limit"
-    icon: "mdi:alert-octagon"
-    min_value: 0
-    max_value: 100
-    initial_value: 0
-    step: 1
-    restore_value: true
-    optimistic: True
-    mode: box
-    entity_category: config   
-    unit_of_measurement: "%"
-    
-    
+
+# Here we are getting the time from home assistant.
+# Using time, and the Lights on and lights off and p2 window close time,
+# we can run scripts and set variables at lights on and lights off.
+# Currently this runs once a minute, converts the current time to HH:MM:SS in a string
+# and compares that to lights on time and lights off time.
+# We can add additional times, to trigger a manual P0>P1 or P1>P2 transition at set times of day
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time:
+      seconds: 0
+      minutes: /1
+      then:
+        lambda: |-
+          char str[9];
+          time_t currTime = id(ha_time).now().timestamp;
+          strftime(str, sizeof(str), "%H:%M:%S", localtime(&currTime));
+          if (str == to_string(id(lights_on_time).state)) { // Compare strings using strcmp
+            ESP_LOGD("main", "This would be lights on");
+          }
+          if (str == to_string(id(lights_off_time).state)) { // Compare strings using strcmp
+            ESP_LOGD("main", "This would be lights off");
+          }
