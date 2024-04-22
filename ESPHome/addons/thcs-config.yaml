@@ -1,7 +1,7 @@
-### RS485
+### RS485 uart settings to get the ESP talking to the RS485 adapter and the adapter talkin  to the THC-S
 uart:
   id: modbus_serial
-  rx_pin: ${uart_rx_pin}
+  rx_pin: ${uart_rx_pin}  # swap in user pins
   tx_pin: ${uart_tx_pin}
   baud_rate: 4800
   stop_bits: 1
@@ -12,12 +12,12 @@ modbus:
  
 modbus_controller:
   - id: con_modbus_name
-    update_interval: 20s
+    update_interval: 30s
     address: 0x1
     command_throttle: 100ms
     setup_priority: -10
     
-
+# Here are our user-definable number entities.
 number:
   - platform: template
     id: media_volume
@@ -32,6 +32,8 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: "Gallons"
+# This is the total drip rate each plant is getting per minute.
+# If you have 1 liter per minute drippers, and you use 2 drippers per plant, this should be 2000
   - platform: template
     id: drip_rate
     name: "Drip Rate"
@@ -45,12 +47,13 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: ml/minute   
+# The P0 dryback target is how much VWC should drop after lights on before irrigations start 
   - platform: template
     id: p0_dryback_target
-    name: "p0 Dryback Target"
+    name: "P0 Dryback Target"
     icon: "mdi:water-percent"
     min_value: 0
-    max_value: 10
+    max_value: 15
     initial_value: 3
     step: 1
     restore_value: true
@@ -58,6 +61,7 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: "%"
+# How Often P1 waters
   - platform: template
     id: p1_frequency
     name: "P1 Frequency"
@@ -71,9 +75,10 @@ number:
     mode: box
     entity_category: config 
     unit_of_measurement: minutes
-  - platform: template
+# VWC % Shot size target
+- platform: template
     id: p1_shot_size
-    name: "p1 Shot %"
+    name: "P1 Shot %"
     icon: "mdi:water-percent"
     min_value: 0
     max_value: 25
@@ -84,9 +89,10 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: "%"
+# This is the maximum amount of shots P1 should try before switching to P2
   - platform: template
     id: p1_target_shots
-    name: "p1 Target Shots"
+    name: "P1 Target Shots"
     icon: "mdi:water-percent"
     min_value: 0
     max_value: 16
@@ -97,9 +103,10 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: "%"
-  - platform: template
+# An internal counter to keep track of how many shots we have done
+- platform: template
     id: p1_shot_count
-    name: "p1 Shots"
+    name: "P1 Shots"
     internal: true
     min_value: 0
     max_value: 33
@@ -111,9 +118,10 @@ number:
       - text_sensor.template.publish:
           id: p1_shot_count_display
           state: !lambda "return {to_string(id(p1_shot_count).state)};"
+# An EC target to use for ending P1, if its not low enough keep going in vegetative
   - platform: template
     id: p2_ec_target
-    name: "p2 EC Target"
+    name: "P2 EC Target"
     icon: "mdi:water-percent"
     min_value: 0
     max_value: 100
@@ -127,7 +135,7 @@ number:
 
   - platform: template
     id: p2_dryback_target
-    name: "p2 Dryback Target"
+    name: "P2 Dryback Target"
     icon: "mdi:water-percent"
     min_value: 0
     max_value: 100
@@ -140,7 +148,7 @@ number:
     unit_of_measurement: "%"
   - platform: template
     id: p2_shot_size
-    name: "p2 Shot Size"
+    name: "P2 Shot Size"
     icon: "mdi:water-percent"
     min_value: 0
     max_value: 100
@@ -154,7 +162,7 @@ number:
     
   - platform: template
     id: p3_dryback_target
-    name: "p3 Dryback Target"
+    name: "P3 Dryback Target"
     icon: "mdi:water-percent"
     min_value: 0
     max_value: 100
@@ -165,13 +173,14 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: "%"
-  - platform: template
+# This is the low VWC limit our plants should ever get, below this is wilt territory
+- platform: template
     id: p3_vwc_low_limit
-    name: "p3 VWC Low Limit"
+    name: "P3 VWC Low Limit"
     icon: "mdi:alert-octagon"
     min_value: 0
     max_value: 100
-    initial_value: 0
+    initial_value: 20
     step: 1
     restore_value: true
     optimistic: True
