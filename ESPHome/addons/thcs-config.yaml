@@ -38,7 +38,7 @@ number:
     id: plant_count
     name: "Plant Count"
     icon: "mdi:sprout"
-    min_value: 0
+    min_value: 1
     max_value: 36
     initial_value: 9
     step: 1
@@ -46,7 +46,8 @@ number:
     optimistic: True
     mode: box
     entity_category: config
-    unit_of_measurement: "Gallons"
+    unit_of_measurement: "plants"
+    
 # This is the total drip rate each plant is getting per minute.
 # If you have 1 liter per minute drippers, and you use 2 drippers per plant, this should be 2000
   - platform: template
@@ -91,7 +92,7 @@ number:
     entity_category: config 
     unit_of_measurement: minutes
 # VWC % Shot size target
-- platform: template
+  - platform: template
     id: p1_shot_size
     name: "P1 Shot %"
     icon: "mdi:water-percent"
@@ -119,7 +120,7 @@ number:
     entity_category: config
     unit_of_measurement: "%"
 # An internal counter to keep track of how many shots we have done
-- platform: template
+  - platform: template
     id: p1_shot_count
     name: "P1 Shots"
     internal: true
@@ -189,7 +190,7 @@ number:
     entity_category: config
     unit_of_measurement: "%"
 # This is the low VWC limit our plants should ever get, below this is wilt territory
-- platform: template
+  - platform: template
     id: p3_vwc_low_limit
     name: "P3 VWC Low Limit"
     icon: "mdi:alert-octagon"
