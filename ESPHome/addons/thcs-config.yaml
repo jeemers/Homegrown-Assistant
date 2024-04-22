@@ -1,7 +1,7 @@
-### RS485 uart settings to get the ESP talking to the RS485 adapter and the adapter talkin  to the THC-S
+### RS485
 uart:
   id: modbus_serial
-  rx_pin: ${uart_rx_pin}  # swap in user pins
+  rx_pin: ${uart_rx_pin}
   tx_pin: ${uart_tx_pin}
   baud_rate: 4800
   stop_bits: 1
@@ -12,13 +12,14 @@ modbus:
  
 modbus_controller:
   - id: con_modbus_name
-    update_interval: 30s
+    update_interval: 20s
     address: 0x1
     command_throttle: 100ms
     setup_priority: -10
     
-# Here are our user-definable number entities.
+
 number:
+# How many gallons of plant root space? Only gallons because theyre more common pot sizes than liters
   - platform: template
     id: media_volume
     name: "Media Volume"
@@ -26,6 +27,20 @@ number:
     min_value: 0
     max_value: 20
     initial_value: 2
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "Gallons"
+# Plant count so we can figure out how much water we are using 
+  - platform: template
+    id: plant_count
+    name: "Plant Count"
+    icon: "mdi:sprout"
+    min_value: 0
+    max_value: 36
+    initial_value: 9
     step: 1
     restore_value: true
     optimistic: True
@@ -187,3 +202,19 @@ number:
     mode: box
     entity_category: config   
     unit_of_measurement: "%"
+ 
+ # lets count the daily irrigation events.
+  - platform: template
+    id: daily_irrigation_events
+    name: "Daily Irrigation Events"
+    internal: true
+    min_value: 0
+    max_value: 50
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    on_value:  # each shot, we update the text sensor to show how many shots
+      - text_sensor.template.publish:
+          id: daily_shot_count_display
+          state: !lambda "return {to_string(id(daily_irrigation_events).state)};"
