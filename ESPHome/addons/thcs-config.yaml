@@ -1,0 +1,180 @@
+### RS485
+uart:
+  id: modbus_serial
+  rx_pin: ${uart_rx_pin}
+  tx_pin: ${uart_tx_pin}
+  baud_rate: 4800
+  stop_bits: 1
+
+modbus:
+  id: modbus1
+  uart_id: modbus_serial
+ 
+modbus_controller:
+  - id: con_modbus_name
+    update_interval: 20s
+    address: 0x1
+    command_throttle: 100ms
+    setup_priority: -10
+    
+
+number:
+  - platform: template
+    id: media_volume
+    name: "Media Volume"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 20
+    initial_value: 2
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "Gallons"
+  - platform: template
+    id: drip_rate
+    name: "Drip Rate"
+    icon: "mdi:water-percent"
+    min_value: 01
+    max_value: 100000
+    initial_value: 1250
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: ml/minute   
+  - platform: template
+    id: p0_dryback_target
+    name: "p0 Dryback Target"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 10
+    initial_value: 3
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p1_frequency
+    name: "P1 Frequency"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 60
+    initial_value: 15
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config 
+    unit_of_measurement: minutes
+  - platform: template
+    id: p1_shot_size
+    name: "p1 Shot %"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 25
+    initial_value: 5
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p1_target_shots
+    name: "p1 Target Shots"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 16
+    initial_value: 5
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p1_shot_count
+    name: "p1 Shots"
+    internal: true
+    min_value: 0
+    max_value: 33
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    on_value:  # each shot, we update the text sensor to show how many shots
+      - text_sensor.template.publish:
+          id: p1_shot_count_display
+          state: !lambda "return {to_string(id(p1_shot_count).state)};"
+  - platform: template
+    id: p2_ec_target
+    name: "p2 EC Target"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 100
+    initial_value: 3.0
+    step: 0.1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "EC"
+
+  - platform: template
+    id: p2_dryback_target
+    name: "p2 Dryback Target"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p2_shot_size
+    name: "p2 Shot Size"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+    
+  - platform: template
+    id: p3_dryback_target
+    name: "p3 Dryback Target"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: p3_vwc_low_limit
+    name: "p3 VWC Low Limit"
+    icon: "mdi:alert-octagon"
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config   
+    unit_of_measurement: "%"
