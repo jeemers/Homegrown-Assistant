@@ -358,7 +358,14 @@ binary_sensor:
   - platform: template
     id: p1_at_field_capacity
     name: "At Field Capacity"
-    
+
+switch:
+# here a switch to toggle auto watering.
+  - platform: template
+    name: "Auto Water"
+    id: auto_water
+    optimistic: true
+
 # Here We define the steering and irrgation phases.
 # Steering phases will change as the grow progresses,
 # And irrigation phases change as the day progresses.
@@ -413,6 +420,7 @@ time:
           }
 
 script:
+# Do stuff at lights on
 - id: lightsonscript
   mode: single
   then:
@@ -438,7 +446,7 @@ script:
 
       // Set irrigation phase to P0
       id(irrigation_phase).make_call().set_option("P0");
-
+# Do stuff at lights off
 - id: lightsoffscript
   mode: single
   then:
@@ -448,11 +456,13 @@ script:
       id(irrigation_phase).make_call().set_option("P3");
       id(p1_shot_count).make_call().number_to_min();
       id(p1_at_field_capacity).publish_state(false);
-- id: vwc_check
+
+# vwc_check is gonna get called every time VWC updates
+- id: vwc_check 
   mode: single
   then:
     - if:
-        condition: #Check if current VWC
+        condition: #Check if current VWC is higher than last_high and if so, update last_hihg
           lambda: 'return id(VWC).state > id(last_high).state;'
         then:  
           - sensor.template.publish:
@@ -482,4 +492,26 @@ script:
         condition: # Check if we are set to P1
           lambda: 'return id(irrigation_phase).state.c_str() == "P1";'
         then:
-          # here we will start the P1 script, and hopefulyl this process terminates so it can keep exectuing
+          - if:
+              condition:
+                - script.is_running: p1loop
+              then:
+                - logger.log: "p1loop already running, all done"
+              else:
+                - script.execute: p1loop
+
+- id: p1loop
+  mode: single
+  then:
+    # If auto_water is true then:
+    # we make sure its still P0, 
+    # wait til time is divisible by P1 frequency to see if we need to do a shot, or
+    # set field capacity, or end P1 and start P2
+    # Check if p1_shot_count >= P1_target_shots, if so end P1 start P2 because out of shots no matter what.
+    # if not, assume we need to water, but check field capacity:
+    # Check if VWC - last_low <= 1.2 and if so, set at_field_capacity true, and field_capacity to VWC
+    # Then set last_low value to current VWC
+    # turn on the pump valve
+    # delay for p1_shot_time
+    # turn off pump.
+    # continue the until loop hits p2
