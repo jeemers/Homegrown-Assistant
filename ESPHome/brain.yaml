@@ -1,0 +1,974 @@
+esphome:
+  name: 4x4brain
+  friendly_name: 4x4 Brain
+  on_boot: 
+    then:
+      - script.execute: lightsoffscript
+      - script.execute: lightsonscript
+
+#### Rest pf ypur ESP config stuff
+
+# Enable and configure logging
+logger:
+  logs:
+    graph: ERROR
+    sensor: INFO
+    mqtt: WARN
+    text_sensor: INFO
+    number: INFO
+    number.automation: DEBUG
+    script: DEBUG
+    modbus_controller.sensor: INFO
+    hx711: INFO
+    ultrasonic.sensor: INFO
+    binary_sensor: INFO
+    
+  switch_light: "switch.mini_plug_3"
+  switch_irrigation_pump: "switch.hose_valve"
+  datetime_lights_on: "input_datetime.4x4_lights_on"
+  datetime_lights_off: "input_datetime.4x4_lights_off"
+  datetime_p2window_close: "input_datetime.4x4_p2_window_close"
+  boolean_maintainance_mode: "input_boolean.4x4_maintainence_mode"
+  uart_tx_pin: "18" # This is the TX pin the RS485 adapter is connected to
+  uart_rx_pin: "5" # This is the RX pin the RS485 adapter is conencted to
+
+<<: !include addons/thcs-config.yaml  # This file has the UART settings, and number variables in it
+<<: !include addons/brain-display.yaml  # This file has settings for the screen, comment out if you dont have ont.
+
+## i2c bus, if you used the default pins for your board and defined it properly, you don't need 
+## to define these pins. otherwise, set them here.
+i2c: 
+  frequency: 400kHz
+  
+sensor:
+####################################
+## H A R D W A R E  S E N S O R S ##
+####################################
+# HX711 load cell scale and gallon conversion
+  - platform: hx711
+    name: "scale weight"
+    id: "raw"
+    dout_pin: 15
+    clk_pin: 2
+    gain: 64
+    update_interval: 10s
+    filters:
+      - calibrate_linear:
+         method: least_squares
+         datapoints:
+          # Map 0.0 (from sensor) to 1.0 (true value)  
+          - -1647652 -> 119.748
+          - -412674 -> 11.34
+          - -281410 -> 0.0
+      - clamp:
+          min_value: 0
+      - round: 2
+      - median:
+          window_size: 10
+          send_every: 1
+          send_first_at: 1
+    unit_of_measurement: kg
+
+  - platform: template
+    name: "scale gallons"
+    id: "scale1gallons"
+    lambda: |-
+          return id(raw).state / 3.8;
+    update_interval: 30s
+    filters:
+      - clamp:
+          min_value: 0
+      - round: 2
+    unit_of_measurement: gallons
+
+# Ultrasonic sensors and volume calculations
+  - platform: ultrasonic
+    trigger_pin: GPIO16
+    echo_pin: GPIO17
+    id: ultrasonicraw
+    internal: True
+    name: "Ultrasonic raw"
+    icon: mdi:water
+    unit_of_measurement: 'm'
+    accuracy_decimals: 2
+    update_interval: 30s
+    pulse_time: 10us
+    timeout: 3m
+
+  - platform: template
+    name: "Ultrasonic Level"
+    icon: mdi:water
+    unit_of_measurement: 'cm'
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: return ((((id(ultrasonicraw).state*100)-29)-(60-29))/(60-29))*-115; #used to be 71, then it kept being 59 lol
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10 #creates a moving average of the last 10 values
+          send_every: 1 #sends the moving average at every measurement (but only if it passes the delta filter below))
+          send_first_at: 1 #after startup immediately start sending the result rather than wait for the first 10 measurements
+      - delta : 0.05 # only send the result if the level difference with the last sent result is higher than this   
+      - filter_out: nan
+
+  - platform: template
+    name: "Ultrasonic Volume"
+    unit_of_measurement: 'l'
+    icon: mdi:water
+    accuracy_decimals: 2
+    update_interval: 30s 
+    lambda: return ((((id(ultrasonicraw).state*100)-29)-(60-29))/(60-29))*-115;
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10 #creates a moving average of the last 10 values
+          send_every: 1 #sends the moving average at every measurement (but only if it passes the delta filter below))
+          send_first_at: 1 #after startup immediately start sending the result rather than wait for the first 10 measurements
+      - delta : 0.05 # only send the result if the level difference with the last sent result is higher than this   
+      - filter_out: nan
+
+
+# AHT10 temp humidity and VPD
+  - platform: aht10
+    temperature:
+      name: "aht10 Temperature"
+      id: "Temperatureaht10"
+      filters:
+       - timeout: 
+           seconds: 16
+    humidity:
+      name: "aht10 Humidity"
+      id: "Humidityaht10"
+      filters:
+       - timeout: 
+           seconds: 16
+    update_interval: 10s
+
+  - platform: template
+    name: "aht10 VPD"
+    lambda: |-
+          return (((100 - id(Humidityaht10).state) / 100) * (0.61078 * 2.718281828459045 * (17.2694 * ((id(Temperatureaht10).state)) / (((id(Temperatureaht10).state)) + 238.3))));
+    update_interval: 10s
+    unit_of_measurement: kPa
+
+# BME280 temp hum pressure and VPD
+  - platform: bme280_i2c
+    temperature:
+      name: "bme280 Temperature"
+      id: "Temperaturebme280"
+      oversampling: 16x
+      filters:
+       - timeout: 
+           seconds: 16
+    pressure:
+      name: "bme280 Pressure"
+    humidity:
+      name: "bme280 Humidity"
+      id: "Humiditybme280"
+      filters:
+       - timeout: 
+           seconds: 16
+    address: 0x76
+    update_interval: 10s
+  - platform: template
+    name: "VPD"
+    lambda: |-
+          return (((100 - id(Humiditybme280).state) / 100) * (0.6108 * 2.718281828459045 * (17.27 * ((id(Temperaturebme280).state)) / (((id(Temperaturebme280).state)) + 237.3))));
+    update_interval: 10s
+    unit_of_measurement: kPa
+
+
+
+## THC-S Sensors ##
+# Raw moisture from 0-100 from the sensor
+  - platform: modbus_controller
+    name: "THC-S Moisture"  
+    id: WC
+    address: 0x0000
+    unit_of_measurement: "%"
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+      lambda: return (x / 10);
+    state_class: measurement
+
+
+# Temp in C from the THCS  
+  - platform: modbus_controller
+    name: "THC-S Temp"
+    id: C
+    address: 0x0001
+    unit_of_measurement: "°C"
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters: 
+      lambda: return (x / 10);
+    state_class: measurement
+
+
+# Raw conductivity from the THCS, used for pwEC calculatiions
+  - platform: modbus_controller
+    name: "THC-S Conductivity"  
+    id: EC
+    address: 0x0002
+    unit_of_measurement: "ms/cm"
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+      lambda: return x;
+    state_class: measurement
+
+# This is a "TDS" output from the sensor in PPM, not sure what conversion or accuracy.    
+  - platform: modbus_controller
+    name: "THC-S TDS"  
+    disabled_by_default: True  # user has to enable it first
+    id: TDS
+    address: 0x0004
+    unit_of_measurement: "ppm"
+    register_type: holding
+    value_type: U_WORD
+    accuracy_decimals: 1
+    filters:
+      lambda: return x;
+    state_class: measurement
+
+
+# This template is estimating the VWC based on raw moisture and a 66.7% VWC Coco coir
+  - platform: template
+    name: "THC-S VWC"  
+    internal: False
+    id: VWC
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: |-
+      float soil_hum = id(WC).state;
+      float adjusted_vwc = -0.0020844495456097786 * soil_hum * soil_hum + 0.8758395803818368 * soil_hum - 0.007765958483453483;
+      return adjusted_vwc;
+    state_class: measurement
+    unit_of_measurement: "%"
+    on_value: 
+      then:
+        - script.execute: vwc_check
+
+
+#  This calculation is gettin the pore water EC based on the hilhorst method, calibrated for coco
+  - platform: template
+    name: "THC-S pwEC"
+    id: pw_ec
+    state_class: measurement
+    unit_of_measurement: "ms/cm"
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: |-
+      float soil_ec = id(EC).state;
+      float soil_temp = id(C).state;
+      float soil_hum = id(WC).state;
+      //soil_ec = 1.93 * soil_ec - 270.8;
+      soil_ec = 0.0000014403 * soil_ec * soil_ec * soil_ec - 0.0036 * soil_ec * soil_ec + 3.7525 * soil_ec - 814.1833;
+      /**
+      * Bulk EC temperature correction. Test and use if necessary.
+      */
+      // Soil EC temp correction based on the Teros 12 manual. https://github.com/kromadg/soil-sensor/issues/1
+      soil_ec = soil_ec / (1.0 + 0.019 * (soil_temp - 25));
+      // the teros bulk_permittivity was calculated from the teros temperature, teros bulk ec and teros pwec by Hilhorst 2000 model
+      float soil_apparent_dieletric_constant = 1.3088 + 0.1439 * soil_hum + 0.0076 * soil_hum * soil_hum;
+
+      float soil_bulk_permittivity = soil_apparent_dieletric_constant;  /// Hamed 2015 (apparent_dieletric_constant is the real part of permittivity)
+      float soil_pore_permittivity = 80.3 - 0.37 * (soil_temp - 20); /// same as water 80.3 and corrected for temperature
+
+      // converting bulk EC to pore water EC
+      float soil_pw_ec;
+      if (soil_bulk_permittivity > 4.1)
+          soil_pw_ec = ((soil_pore_permittivity * soil_ec) / (soil_bulk_permittivity - 4.1) / 1000); /// from Hilhorst 2000.
+      else
+          soil_pw_ec = 0;
+      return soil_pw_ec;
+
+
+# non-contact water sensor at the top of reservoir to know when full  
+  - platform: adc
+    #raw: true
+    pin: GPIO35
+    name: "Tank full switch raw"
+    id: "tankswitchraw"
+    unit_of_measurement: "mV"
+    accuracy_decimals: 0
+    force_update : true
+    update_interval: 5s
+    attenuation: auto
+    filters:
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
+      - timeout: 
+          seconds: 16
+
+
+##################################
+## V I R T U A L  S E N S O R S ##
+##################################
+## these are all used in as part of the irrigation automation stuff.
+## these are sensors entities and not number entities because they don't need to be set by the username
+## They are supposed to be set by the automations based on user inputs and sensor readings
+
+# For P1 and P2 Irrigation times, we take:
+#  - the media volume
+#  - the flow rate of our drippers. how much water each plant gets per minute, scale this with how many drippers per plant.
+#  - the max VWC, in this case 66.7%
+#  - the target shot % size
+# And we calculate how many ml of water that target shot % should be,
+# and how many seconds we should run the pump to reach that target ml of water
+  - platform: template
+    id: p1_irrigation_time
+    name: "P1 Irrigation Time"
+    icon: "mdi:clock-outline"
+    unit_of_measurement: seconds
+    lambda: |-
+      float dryback_target = (id(p1_shot_size).state) / 100;
+      float media_volume_liters = id(media_volume).state * 3.78541;
+      float water_holding_capacity = 0.667;
+      float water_capacity_liters = media_volume_liters * water_holding_capacity;
+      float dryback_percent_water_liters = water_capacity_liters * dryback_target;
+      float dryback_percent_water_ml = dryback_percent_water_liters * 1000;
+      float pump_run_time_seconds = dryback_percent_water_ml / (id(drip_rate).state / 60);
+      return pump_run_time_seconds;
+
+
+# The P1/P2 Shot volume targets are calculated the same way as the irrigation time, just returns the volume of water in ml
+  - platform: template
+    id: p1_shot_volume
+    name: "P1 Shot Volume Target"
+    icon: "mdi:clock-outline"
+    unit_of_measurement: ml
+    lambda: |-
+      float shot_target = (id(p1_shot_size).state) / 100;
+      float media_volume_gallons = id(media_volume).state;
+      float media_volume_liters = media_volume_gallons * 3.78541;
+      float water_holding_capacity = 0.667;
+      float water_capacity_liters = media_volume_liters * water_holding_capacity;
+      float shot_percent_water_liters = water_capacity_liters * shot_target;
+      float shot_percent_water_ml = shot_percent_water_liters * 1000;
+      return shot_percent_water_ml;
+
+
+# This sensor will end up being the highest VWC we get to in P1 between irrigation spikes.
+# It will be the value our p2 dryback target vwc% will be based on, p1 runoff wc - p2 dryback target. For vegetative phases.
+  - platform: template
+    id: p1_runoff_wc
+    name: "p1 Runoff VWC"
+    icon: "mdi:water-percent"
+    unit_of_measurement: "%"
+# This sensor is the same as the previous one but for our P2 shots
+  - platform: template
+    id: p2_irrigation_time
+    name: "P2 Irrigation Time"
+    icon: "mdi:clock-outline"
+    unit_of_measurement: seconds
+    lambda: |-
+      float dryback_target = (id(p2_shot_size).state) / 100;
+      float media_volume_liters = id(media_volume).state * 3.78541;
+      float water_holding_capacity = 0.667;
+      float water_capacity_liters = media_volume_liters * water_holding_capacity;
+      float dryback_percent_water_liters = water_capacity_liters * dryback_target;
+      float dryback_percent_water_ml = dryback_percent_water_liters * 1000;
+      float pump_run_time_seconds = dryback_percent_water_ml / (id(drip_rate).state / 60);
+      return pump_run_time_seconds;
+  - platform: template
+    id: p2_shot_volume
+    name: "P2 Shot Volume Target" # Same as P1
+    icon: "mdi:clock-outline"
+    unit_of_measurement:  ml
+    lambda: |-
+      float shot_target = (id(p2_shot_size).state) / 100;
+      float media_volume_gallons = id(media_volume).state;
+      float media_volume_liters = media_volume_gallons * 3.78541;
+      float water_holding_capacity = 0.66;
+      float water_capacity_liters = media_volume_liters * water_holding_capacity;
+      float shot_percent_water_liters = water_capacity_liters * shot_target;
+      float shot_percent_water_ml = shot_percent_water_liters * 1000;
+      return shot_percent_water_ml;
+
+
+# For the P2 minimum VWC target sensor, depending on whether we are vegetative or generative,
+# we aim for a dryback either from the maximum VWC during P1, so we can stay within runoff territory and keep EC lowering shot to shot
+# Or from the base VWC we detected as field capacity by the end of P1. instead of from runoff VWC,
+# This enables us to just stay at or under field capacity and let the pwEC rise as VWC gets lower.
+  - platform: template
+    id: p2_min_wc_target
+    name: "P2 Min VWC Target"
+    icon: "mdi:water-percent"
+    unit_of_measurement: "%"
+    lambda: |-
+      if (id(steering_phase).state == "Vegetative - Veg" || id(steering_phase).state == "Vegetative - bulk") {
+        return (id(p1_runoff_wc).state - id(p2_dryback_target).state);
+      } else {
+        return (id(field_capacity).state - id(p2_dryback_target).state);
+      }
+
+
+# This will just be the VWC P3 ends at, either because we reached P0 dryback goal or P3 dryback goal
+  - platform: template
+    id: p3_end_wc
+    name: "P3 End VWC"
+    icon: "mdi:water-percent"
+    unit_of_measurement: "%"
+
+
+# P3 Last dryback will be calculated each morning as soon as P1 starts, based on start and end p3 vwc
+  - platform: template
+    id: p3_last_dryback
+    name: "P3 Last Dryback"
+    icon: "mdi:water-percent"
+    lambda: return id(p3_start_wc).state - id(p3_end_wc).state;
+    unit_of_measurement: "%"
+
+
+# Will be set at lights off to the last high VWC value after the most recent irrigation
+  - platform: template
+    id: p3_start_wc
+    name: "P3 Start WC"
+    icon: "mdi:water-percent"
+    unit_of_measurement: "%"
+
+
+# VWC at lights off/on, so we know when we hit the P0 dryback goal
+  - platform: template
+    id: p3_wc_at_lights_on
+    name: "P3 WC at Lights On"
+    icon: "mdi:lightbulb-on-outline"
+    internal: false
+    unit_of_measurement: "%"
+  - platform: template
+    id: p3_wc_at_lights_off
+    name: "P3 WC at Lights Off"
+    icon: "mdi:lightbulb-on-outline"
+    internal: false
+    unit_of_measurement: "%"
+
+# The current value of dryback from last known high value til now.
+  - platform: template
+    id: currentdryback
+    name: "Current Dryback"
+    icon: "mdi:water-percent"
+    lambda: return id(last_high).state - id(VWC).state;
+    unit_of_measurement: "%"
+
+
+# This is going to be set in the P1 script once it detects field capacity,
+# It presumes field capacity once the VWC at time of P1 irrigation is less than 2% from VWC at previous irrigation 
+  - platform: template
+    id: field_capacity
+    name: "Field Capacity"
+    icon: "mdi:water-percent"
+    unit_of_measurement: "%"
+
+# This will get updated everytime VWC updates, if current VWC is > this value.
+# It will also get reset between irrigations, so we can track each dryback and irrigation event
+  - platform: template
+    id: last_high
+    name: "Last High VWC"
+    icon: "mdi:arrow-up-bold-circle-outline"
+    internal: false
+    unit_of_measurement: "%"
+
+# Similar to last high except gets set at each irrigation event.
+  - platform: template
+    id: last_low
+    name: "Last Low VWC"
+    icon: "mdi:arrow-down-bold-circle-outline"
+    internal: false
+    unit_of_measurement: "%"
+
+
+# We calculate our target P3 VWC based on subtracting our P3 dryback target % from our last high VWC value
+  - platform: template
+    id: p3_target_wc
+    name: "P3 Target VWC"
+    icon: "mdi:water-percent"
+    lambda: |-
+      return id(last_high).state - id(p3_dryback_target).state;
+    unit_of_measurement: "%"
+
+
+# lets estimate how much water we use throughout the day
+# First we are going to multiple P1 shot count * plant count * p1 shot volume
+# Then we do P2 shot time * plant count * (daily shot count - p1 shot count)
+# Then add those together. 
+  - platform: template
+    id: total_daily_ml_estimate
+    name: "Daily ml use estimate"
+    icon: "mdi:water-check"
+    lambda: |-
+      float totalmlp1 = (id(p1_shot_volume).state * id(plant_count).state) * id(p1_shot_count).state;
+      float p2events = id(daily_irrigation_events).state - id(p1_shot_count).state;
+      float totalmlp2 = (id(p2_shot_volume).state * id(plant_count).state) * p2events;
+      float totalmlday = totalmlp1 + totalmlp2;
+      return totalmlday / 1000.0;
+    unit_of_measurement: "liters"
+
+
+## Wi-fi sensors for signal strengh, and uptime
+  - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
+    name: "WiFi Signal dB"
+    id: wifi_signal_db
+    update_interval: 30s
+    entity_category: "diagnostic"
+
+  - platform: copy # Reports the WiFi signal strength in %
+    source_id: wifi_signal_db
+    name: "WiFi Signal Percent"
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "Signal %"
+    entity_category: "diagnostic"
+    device_class: ""
+    
+  - platform: uptime
+    name: Uptime
+    update_interval: 60s
+    entity_category: diagnostic
+
+
+
+
+############################
+## T E X T  S E N S O R S ##
+############################
+text_sensor:
+# Send IP Address to HA.
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+      entity_category: diagnostic
+
+# This is a text sensor that will update each time we irrigate
+  - platform: template
+    name: "P1 Shots"
+    id: p1_shot_count_display
+    icon: mdi:tally-mark-5
+# same but for daily total shots
+  - platform: template
+    name: "Daily Shots"
+    id: daily_shot_count_display
+    icon: mdi:tally-mark-5
+
+# Text sensor to see if Maintainence mode is on and turn the LED on if so.
+  - platform: homeassistant
+    name: 4x4 Maintainence status
+    internal: False
+    entity_id: input_boolean.4x4_maintainence_mode
+    on_value:
+      then:
+        lambda: |-
+          if(x == "on") {
+            auto call = id(bled).turn_on();
+            call.perform();
+          } else {
+            auto call = id(bled).turn_off();
+            call.perform();
+          }
+# we need to know what time lights on and lights of is to start P0 and get the day started.
+  - platform: homeassistant
+    name: Lights On
+    id: lights_on_time
+    internal: false
+    entity_id: ${datetime_lights_on}
+  - platform: homeassistant
+    name: Lights Off
+    id: lights_off_time
+    internal: false
+    entity_id: ${datetime_lights_off}
+
+binary_sensor:
+#####################
+## H A R D W A R E ##
+# The button
+  - platform: gpio
+    id: gpio13
+    pin:
+      number: GPIO13
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    name: "Button"
+    internal: false
+    filters:
+      - delayed_on: 10ms
+# Tank full swith
+  - platform: analog_threshold
+    name: "Tank Full"
+    sensor_id: tankswitchraw
+    threshold: 0.5
+    filters:
+      - invert:
+
+###################
+## V I R T U A L ##
+# P3 needs water = set true wne vwc is lower than target low vwc limit target
+  - platform: template 
+    id: p3_needs_water
+    name: "P3 Needs Water"
+    lambda: |-
+      if (id(VWC).state <= id(p3_vwc_low_limit).state) {
+        return true;
+      } else {
+        return false;
+      }
+
+# This is going to be set true by the P1 script once it hits field capacity.
+  - platform: template
+    id: p1_at_field_capacity
+    name: "At Field Capacity"
+    
+light:
+# Button LED
+  - platform: binary
+    name: "Button LED"
+    output: Button_LED
+    id: bled
+
+output:
+# Exhaust Fan
+  - platform: ledc
+    pin: GPIO27 #Connects to the FAN PWM OUT in the diagram
+    id: exhaust_fan_pwm
+    inverted: true
+    frequency: 1000 Hz
+# button LED
+  - id: Button_LED
+    platform: gpio
+    inverted: false
+    pin: GPIO12
+    
+fan:
+# Exhaust Fan
+  - platform: speed
+    output: exhaust_fan_pwm
+    name: "Exhaust Fan"
+    restore_mode: RESTORE_DEFAULT_ON
+    id: exhaust_fan
+  
+switch:
+  - platform: gpio
+    name: "Pump 1"
+    pin:
+      number: GPIO26
+      inverted: true
+  - platform: gpio
+    name: "Pump 2"
+    pin:
+      number: GPIO25
+      inverted: true
+  - platform: gpio
+    name: "Pump 3"
+    pin: 
+      number: GPIO33
+      inverted: true
+  - platform: gpio
+    name: "Pump 4"
+    pin: 
+      number: GPIO32
+      inverted: true
+
+# here a switch to toggle auto watering.
+  - platform: template
+    name: "Auto Water"
+    id: auto_water
+    optimistic: true
+
+# Here We define the steering and irrgation phases.
+# Steering phases will change as the grow progresses,
+# And irrigation phases change as the day progresses.
+select:
+  - platform: template
+    name: "Steering Phase"
+    id: steering_phase
+    options:
+     - "Vegetative - Veg"
+     - "Generative - Flip"
+     - "Vegetative - Bulk"
+     - "Generative - Finish"
+    initial_option: "Vegetative - Veg"
+    optimistic: true
+  - platform: template
+    name: "Irrigation Phase"
+    id: irrigation_phase
+    options:
+     - "P0"
+     - "P1"
+     - "P2"
+     - "P3"
+    initial_option: "P3"
+    optimistic: True
+# To-Do: add a selector for media type selection to affect VWC and pwEC calibrations
+
+
+# Here we are getting the time from home assistant.
+# Using time, and the Lights on and lights off and p2 window close time,
+# we can run scripts and set variables at lights on and lights off.
+# Currently this runs once a minute, converts the current time to HH:MM:SS in a string
+# and compares that to lights on time and lights off time.
+# We can add additional times, to trigger a manual P0>P1 or P1>P2 transition at set times of day
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time:
+      seconds: 0
+      minutes: /1
+      then:
+        lambda: |-
+          char str[9];
+          time_t currTime = id(ha_time).now().timestamp;
+          int minutes = id(ha_time).now().minute;
+          int freq = id(p1_frequency).state;
+          strftime(str, sizeof(str), "%H:%M:%S", localtime(&currTime));
+          if (str == to_string(id(lights_on_time).state)) 
+          { 
+            ESP_LOGD("main", "lights on");
+            id(lightsonscript).execute();
+          }
+          if (str == to_string(id(lights_off_time).state)) 
+          { 
+            ESP_LOGD("main", "lights off");
+            id(lightsoffscript).execute();
+          } 
+          if (minutes % freq == 0)
+          {
+            if (id(irrigation_phase).state == "P1") {
+              id(p1event).execute();
+            }
+          }
+
+
+script:
+# Do stuff at lights on
+- id: lightsonscript
+  mode: single
+  then:
+    - lambda: |-
+        // set p3 lights on from current VWC
+        id(p3_wc_at_lights_on).publish_state(id(VWC).state);
+
+        // reset last low, last high, field capacity, and runoff wc to 35
+        id(last_low).publish_state(35);
+        id(last_high).publish_state(35);
+        id(p1_runoff_wc).publish_state(35);
+        id(field_capacity).publish_state(35);
+
+        // Reset the counters
+        auto call = id(daily_irrigation_events).make_call();
+        call.number_to_min();
+        call.perform();
+        auto call2 = id(p1_shot_count).make_call();
+        call2.number_to_min();
+        call2.perform();
+        // Set the value 0 to a specific input_number
+        id(total_daily_ml_estimate).publish_state(0);
+
+        // Turn off the input_boolean
+        id(p1_at_field_capacity).publish_state(false);
+    - select.set:
+        id: irrigation_phase
+        option: "P0"
+
+# Do stuff at lights off
+- id: lightsoffscript
+  mode: single
+  then:
+    lambda: |-
+      id(p3_wc_at_lights_off).publish_state(id(VWC).state);
+      id(p3_start_wc).publish_state(id(last_high).state);
+      auto call = id(irrigation_phase).make_call();
+      call.set_option("P3");
+      call.perform();
+      auto call2 = id(p1_shot_count).make_call();
+      call2.number_to_min();
+      call2.perform();
+      id(p1_at_field_capacity).publish_state(false);
+
+# vwc_check is gonna get called every time VWC updates
+- id: vwc_check 
+  mode: single
+  then:
+    - logger.log: "Checking Last VWC vs low and last high..."
+    - if:
+        condition: #Check if current VWC is higher than last_high and if so, update last_high
+          lambda: 'return id(VWC).state > id(last_high).state;'
+        then:  
+          - sensor.template.publish:
+              id: last_high
+              state: !lambda 'return id(VWC).state;'
+          - logger.log: "VWC > last_high, setting new last_high"
+
+    - if:
+        condition: #Check if current VWC is lower than last low
+          lambda: 'return id(VWC).state < id(last_low).state;'
+        then:  
+          - sensor.template.publish:
+              id: last_low
+              state: !lambda 'return id(VWC).state;'
+          - logger.log: "VWC < last_low, setting new last_low"
+    - if:
+        condition: #Check if we are set to P0
+          lambda: 'if (id(irrigation_phase).state == "P0") { return true; } else { return false;}'
+        then:
+          - logger.log: "It's P0, checking if we should start P1..."
+          - if:
+              condition: # Check if P0 dryback or P3 dryback was hit
+                or:
+                  - lambda: 'return (id(p3_wc_at_lights_on).state - id(VWC).state >= id(p0_dryback_target).state);' 
+                  - lambda: 'return (id(currentdryback).state >= id(p3_dryback_target).state);' 
+              then:
+                - logger.log: "Looks like p0 or p3 dryback was met, starting P1."
+                - sensor.template.publish:
+                    id: p3_end_wc
+                    state: !lambda 'return id(VWC).state;'
+                - select.set:
+                    id: irrigation_phase
+                    option: "P1"
+                - script.stop: vwc_check
+    - logger.log: "Checking if we need a P2 shot..."
+    - if:
+        condition: # Check if we are set to P2
+          lambda: 'return id(irrigation_phase).state == "P2";'
+        then:
+          - if:
+              condition: 
+                - lambda: 'return (id(VWC).state<=id(p2_min_wc_target).state);'
+              then:
+                - logger.log: "VWC <= p2 min target, Looks like we need a P2 shot!"
+                - script.execute: p2event
+
+# P1 event will get called by time when we are in p1 and current time is divisible by p1 frequency
+     
+# Check if p1_shot_count >= P1_target_shots, if so end P1 start P2 because out of shots no matter what.
+# if not, assume we need to water, but check field capacity:
+
+# Check if VWC - last_low <= 1.2 and if so, set at_field_capacity true, and field_capacity to VWC
+# Then set last_low value to current VWC
+# If we are in a generative phase we will end p1 and start p2 as soon as field capacity is set.
+
+# If auto_water is true then:
+# we make sure its still P1, 
+    # turn on the pump valve
+# delay for p1_shot_time
+# turn off pump.
+# increment shot counters.
+- id: p1event
+  mode: single
+  then:
+    - if:
+        condition: 
+          - lambda: 'return (id(p1_shot_count).state >= id(p1_target_shots).state);'
+        then: 
+          - logger.log: "Ran out of P1 shots, switching to P2"
+          - select.set:
+              id: irrigation_phase
+              option: "P2"
+          - script.stop: p1event
+    - if:
+        condition:
+          - lambda: 'return ((id(VWC).state - id(last_low).state) <= 1.1);'
+        then: 
+          - logger.log: "Looks like we hit field capacity"
+          - lambda: |-
+                // Set at_field_capacity to true
+                id(p1_at_field_capacity).publish_state(true);
+                // Set field_capacity to VWC
+                id(field_capacity).publish_state(id(VWC).state);
+                id(p1_runoff_wc).publish_state(id(last_high).state);
+                // Set last_low value to current VWC
+                id(last_low).publish_state(id(VWC).state);
+                // Set Irrigation Phase to P2 if we are generative to prevent runoff
+                if (id(steering_phase).state == "Generative - Flip" || id(steering_phase).state == "Generative - Finish")
+                {
+                //id(irrigation_phase).set_option("P2");
+                auto call = id(irrigation_phase).make_call();
+                call.set_option("P2");
+                call.perform();
+                id(p1event).stop();
+                }
+    - if: 
+        condition:
+          - switch.is_on: auto_water
+          - lambda: 'return (id(irrigation_phase).state == "P1");'
+        then: 
+          - logger.log: "Giving a p1 shot."
+          - homeassistant.service: 
+                service: switch.turn_on
+                data: 
+                  entity_id: ${switch_irrigation_pump}
+          - delay: !lambda "return id(p1_irrigation_time).state*1000;"
+          - homeassistant.service: 
+                service: switch.turn_off
+                data: 
+                  entity_id: ${switch_irrigation_pump}
+          - number.increment: p1_shot_count
+          - number.increment: daily_irrigation_events
+
+- id: p2event
+  mode: single
+  then:
+    # if auto water is true, and in P2 turn on the pump
+    # dekay for p2 irrigation time
+    # turn off pump
+    - if: 
+        condition:
+          - switch.is_on: auto_water
+          - lambda: 'return (id(irrigation_phase).state == "P2");'
+        then: 
+          - sensor.template.publish:
+              id: last_low
+              state: !lambda "return id(VWC).state;"
+          - logger.log: "Giving a p2 shot."
+          - homeassistant.service: 
+                service: switch.turn_on
+                data: 
+                  entity_id: ${switch_irrigation_pump}
+          - delay: !lambda "return id(p2_irrigation_time).state*1000;"
+          - homeassistant.service: 
+                service: switch.turn_off
+                data: 
+                  entity_id: ${switch_irrigation_pump}
+          - number.increment: daily_irrigation_events
+          - logger.log: "Delaying to let that last shot spread out."
+          - delay: !lambda "return id(p1_frequency).state*60*1000;"
+
+            
+    # do any VWC/PWEC calculations here evnetually
+    # set last_high to current VWC
+
+button:
+  - platform: template
+    id: runlightsonscript
+    name: "Run lights on script"
+    on_press: 
+      then:
+        - script.execute: lightsonscript
+  - platform: template
+    id: runlightsoffscript
+    name: "Run lights off script"
+    on_press: 
+      then:
+        - script.execute: lightsoffscript
+  - platform: template
+    id: runvwcscript
+    name: "Run VWC Check script"
+    on_press: 
+      then:
+        - script.execute: vwc_check
+  - platform: template
+    id: runp1eventscript
+    name: "Run p1 event script"
+    on_press: 
+      then:
+        - script.execute: p1event
+  - platform: template
+    id: runp2eventscript
+    name: "Run p2 event script"
+    on_press: 
+      then:
+        - script.execute: p2event
