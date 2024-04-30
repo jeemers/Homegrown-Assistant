@@ -1,0 +1,83 @@
+#This file is just for screen stufff
+font:
+  - file: "gfonts://Roboto"
+    id: roboto
+    size: 18
+  - file: "rainyhearts.ttf"
+    id: rainy
+    size: 18
+graph:
+  - id: temprh
+    duration: 6h
+    width: 128
+    height: 48
+    max_value: 90
+    min_value: 40
+    traces:
+      - sensor: Temperaturebme280 
+        line_type: SOLID
+        line_thickness: 2
+
+      - sensor: Humiditybme280
+        line_type: solid
+        line_thickness: 2
+  - id: vwcg
+    duration: 6h
+    width: 128
+    height: 46
+    max_value: 70
+    min_value: 20
+    traces:
+      - sensor: VWC
+        line_type: SOLID
+        line_thickness: 2
+  - id: ecg
+    duration: 6h
+    width: 128
+    height: 46
+    max_value: 12
+    min_value: 1
+    traces:
+      - sensor: pw_ec 
+        line_type: solid
+        line_thickness: 1
+
+animation:
+  - file: "uc.gif"
+    id: my_animation
+    resize: 52x52
+    type: BINARY
+ 
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    address: 0x3C
+    id: screen
+    #lambda: |-
+      #//Ingress shown animation Frame.
+      #//id(my_animation).next_frame();
+      #// Draw the animation my_animation at position [x=0,y=0]
+     # it.image(32, 12, id(my_animation));
+    pages:
+       - id: page1
+         lambda: |-
+           it.printf(8, 0, id(roboto), "%.1f°F", id(Temperaturebme280).state);
+           it.printf(72, 0, id(roboto), "%.1f%%", id(Humiditybme280).state);
+           it.graph(0, 16, id(temprh));
+       - id: page2
+         lambda: |-
+           it.printf(8, 0, id(roboto), "EC: %.1f", id(pw_ec).state);
+           it.printf(64, 0, id(roboto), "VWC: %.1f%%", id(VWC).state);
+           it.graph(0, 16, id(vwcg));
+       - id: page3
+         lambda: |-
+           it.printf(16, 1, id(roboto), "EC: %.1f", id(pw_ec).state);
+           it.printf(16, 20, id(roboto), "VWC: %.1f%%", id(VWC).state);
+           it.printf(16, 40, id(roboto), "%.1f Gallons", id(scale1gallons).state);
+interval:
+  - interval: 3s
+    then:
+      - display.page.show_next: screen
+      - component.update: screen 
+      #interval:
+      #animation.next_frame: my_animation
