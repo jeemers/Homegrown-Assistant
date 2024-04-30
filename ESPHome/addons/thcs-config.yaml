@@ -99,7 +99,7 @@ number:
     min_value: 0
     max_value: 25
     initial_value: 5
-    step: 1
+    step: 0.1
     restore_value: true
     optimistic: True
     mode: box
@@ -118,7 +118,6 @@ number:
     optimistic: True
     mode: box
     entity_category: config
-    unit_of_measurement: "%"
 # An internal counter to keep track of how many shots we have done
   - platform: template
     id: p1_shot_count
@@ -133,7 +132,7 @@ number:
     on_value:  # each shot, we update the text sensor to show how many shots
       - text_sensor.template.publish:
           id: p1_shot_count_display
-          state: !lambda "return {to_string(id(p1_shot_count).state)};"
+          state: !lambda "return {to_string(round(id(p1_shot_count).state))};"
 # An EC target to use for ending P1, if its not low enough keep going in vegetative
   - platform: template
     id: p2_ec_target
@@ -169,7 +168,7 @@ number:
     min_value: 0
     max_value: 100
     initial_value: 0
-    step: 1
+    step: 0.1
     restore_value: true
     optimistic: True
     mode: box
@@ -218,4 +217,4 @@ number:
     on_value:  # each shot, we update the text sensor to show how many shots
       - text_sensor.template.publish:
           id: daily_shot_count_display
-          state: !lambda "return {to_string(id(daily_irrigation_events).state)};"
+          state: !lambda "return {to_string(round(id(daily_irrigation_events).state))};"
