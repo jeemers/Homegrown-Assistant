@@ -1,3 +1,13 @@
+######################################################
+## This is just a proof of concept, all-in-one-ish, ##
+## grow observation and automation 'box' to monitor ##
+## and control a grow tent/zone/bed, based on       ##
+## moisture sensors and user inputs.                ##
+######################################################
+## Still a work in progress and not ready for prime-time.
+## Just an example (to myself mostly) of how to consolidate
+## everything needed into a single ESPHome device
+
 esphome:
   name: 4x4brain
   friendly_name: 4x4 Brain
