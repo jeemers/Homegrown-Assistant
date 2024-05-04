@@ -33,13 +33,7 @@ logger:
     ultrasonic.sensor: INFO
     binary_sensor: INFO
     
-  switch_light: "switch.mini_plug_3"
-  switch_irrigation_pump: "switch.hose_valve"
-  datetime_lights_on: "input_datetime.4x4_lights_on"
-  datetime_lights_off: "input_datetime.4x4_lights_off"
-  datetime_p2window_close: "input_datetime.4x4_p2_window_close"
-  boolean_maintainance_mode: "input_boolean.4x4_maintainence_mode"
-  uart_tx_pin: "18" # This is the TX pin the RS485 adapter is connected to
+TX pin the RS485 adapter is connected to
   uart_rx_pin: "5" # This is the RX pin the RS485 adapter is conencted to
 
 <<: !include addons/thcs-config.yaml  # This file has the UART settings, and number variables in it
