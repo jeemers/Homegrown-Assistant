@@ -19,6 +19,30 @@ modbus_controller:
     
 
 number:
+  - platform: template
+    id: min_fan_speed
+    name: "Minimum Fan Speed"
+    min_value: 0
+    max_value: 100
+    initial_value: 10
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: slider
+    entity_category: config
+    unit_of_measurement: "%"
+  - platform: template
+    id: max_fan_speed
+    name: "Max Fan Speed"
+    min_value: 1
+    max_value: 100
+    initial_value: 98
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: slider
+    entity_category: config
+    unit_of_measurement: "%"
 # How many gallons of plant root space? Only gallons because theyre more common pot sizes than liters
   - platform: template
     id: media_volume
