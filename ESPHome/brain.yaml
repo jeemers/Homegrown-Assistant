@@ -1,24 +1,19 @@
-######################################################
-## This is just a proof of concept, all-in-one-ish, ##
-## grow observation and automation 'box' to monitor ##
-## and control a grow tent/zone/bed, based on       ##
-## moisture sensors and user inputs.                ##
-######################################################
-## Still a work in progress and not ready for prime-time.
-## Just an example (to myself mostly) of how to consolidate
-## everything needed into a single ESPHome device
-
 esphome:
   name: 4x4brain
   friendly_name: 4x4 Brain
   on_boot: 
     then:
-      - script.execute: lightsoffscript
-      - script.execute: lightsonscript
+      - delay: 10s
+      - script.execute: bootupscript
 
-#### Rest pf ypur ESP config stuff
 
-# Enable and configure logging
+esp32:
+  board: denky32
+  framework:
+    type: arduino
+
+# Enable logging
+
 logger:
   logs:
     graph: ERROR
@@ -30,8 +25,42 @@ logger:
     script: DEBUG
     modbus_controller.sensor: INFO
     hx711: INFO
+    fan: INFO
+    ledc.output: INFO
     ultrasonic.sensor: INFO
     binary_sensor: INFO
+    pid.sensor: ERROR
+    pid.climate: ERROR
+    climate: INFO
+    scd4x: INFO
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: ""
+
+ota:
+  password: ""
+
+#mqtt:
+#  broker: hass.local
+#  username: sensors
+#  password: !secret mqtt_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "4x4 brain Fallback Hotspot"
+    password: !secret wifi_password
+
+captive_portal:
+web_server:
+  port: 80
+  ota: false
+  js_url: https://attilafarago.hu/smarthome/esphome_web_server/www.js
     
 substitutions:
   switch_light: "switch.mini_plug_3"
@@ -153,6 +182,17 @@ sensor:
       - delta : 0.05 # only send the result if the level difference with the last sent result is higher than this   
       - filter_out: nan
 
+# SCD41 CO2 sensor
+  - platform: scd4x
+    automatic_self_calibration: false
+    ambient_pressure_compensation_source: bme_pressure
+    update_interval: 10s
+    co2:
+      name: "SCD41 CO2"
+    temperature:
+      name: "SCD41 Temperature"
+    humidity:
+      name: "SCD41 Humidity"
 
 # AHT10 temp humidity and VPD
   - platform: aht10
@@ -188,6 +228,7 @@ sensor:
            seconds: 16
     pressure:
       name: "bme280 Pressure"
+      id: bme_pressure
     humidity:
       name: "bme280 Humidity"
       id: "Humiditybme280"
@@ -491,7 +532,7 @@ sensor:
     name: "Field Capacity"
     icon: "mdi:water-percent"
     unit_of_measurement: "%"
-
+    
 # This will get updated everytime VWC updates, if current VWC is > this value.
 # It will also get reset between irrigations, so we can track each dryback and irrigation event
   - platform: template
@@ -540,12 +581,14 @@ sensor:
     name: "Exhaust fan speed"
     type: COOL
     climate_id: temppid
+    filters:
+      lambda: 'return min(id(max_fan_speed).state,max(id(min_fan_speed).state,x));'
     on_value: 
       then:
       # Set the fan speed to the pid speed the output is already set to directly, to keep things consistent.
         - fan.turn_on: 
-            id: exhaust_fan
-            speed: !lambda 'return x;'
+            id: exhaust_fan 
+            speed: !lambda 'return min(id(max_fan_speed).state,max(id(min_fan_speed).state,x));'
   - platform: pid
     name: "PID Heater Output"
     type: HEAT
@@ -756,6 +799,7 @@ select:
      - "Generative - Finish"
     initial_option: "Vegetative - Veg"
     optimistic: true
+    restore_value: True
   - platform: template
     name: "Irrigation Phase"
     id: irrigation_phase
@@ -766,6 +810,7 @@ select:
      - "P3"
     initial_option: "P3"
     optimistic: True
+    restore_value: True
 # To-Do: add a selector for media type selection to affect VWC and pwEC calibrations
 climate:
   - platform: pid
@@ -782,8 +827,8 @@ climate:
       output_averaging_samples: 5      # smooth the output over 5 samples
       derivative_averaging_samples: 5  # smooth the derivative value over 10 samples
     deadband_parameters:
-      threshold_high: 1.5°C       # deadband within +/-1.5°C of target_temperature
-      threshold_low: -1.5°C
+      threshold_high: 0.5°C       # deadband within +/-1.5°C of target_temperature
+      threshold_low: -0.5°C
 
 # Here we are getting the time from home assistant.
 # Using time, and the Lights on and lights off and p2 window close time,
@@ -823,6 +868,24 @@ time:
 
 
 script:
+# Set some stuff at boot up so other stuff doesnt break
+- id: bootupscript
+  mode: single
+  then:
+    - lambda: |-
+        // reset last low, last high, field capacity, and runoff to THCS VWC
+        id(last_low).publish_state(id(VWC).state); 
+        id(last_high).publish_state(id(VWC).state); 
+        id(p1_runoff_wc).publish_state(id(VWC).state);
+        id(field_capacity).publish_state(id(VWC).state);
+        id(p3_wc_at_lights_off).publish_state(id(VWC).state);
+        id(p3_start_wc).publish_state(id(VWC).state);
+        auto call2 = id(p1_shot_count).make_call();
+        call2.number_to_min();
+        call2.perform();
+        id(p1_at_field_capacity).publish_state(false);
+        id(p3_start_wc).publish_state(id(VWC).state);
+        
 # Do stuff at lights on
 - id: lightsonscript
   mode: single
@@ -830,12 +893,6 @@ script:
     - lambda: |-
         // set p3 lights on from current VWC
         id(p3_wc_at_lights_on).publish_state(id(VWC).state);
-
-        // reset last low, last high, field capacity, and runoff wc to 35
-        if (!id(last_low).has_state()) { id(last_low).publish_state(id(VWC).state); }
-        if (!id(last_high).has_state()) { id(last_high).publish_state(id(VWC).state); }
-        id(p1_runoff_wc).publish_state(45);
-        id(field_capacity).publish_state(45);
 
         // Reset the counters
         auto call = id(daily_irrigation_events).make_call();
@@ -962,7 +1019,7 @@ script:
     - if:
         condition:
           and: 
-            - lambda: 'return ((id(VWC).state - id(last_low).state) <= 1.2);'
+            - lambda: 'return ((id(VWC).state - id(last_low).state) <= 1.1);'
             - lambda: 'return (!(id(p1_at_field_capacity).state));'
             - lambda: 'return (id(p1_shot_count).state > (id(p1_target_shots).state / 2));'
         then: 
@@ -982,7 +1039,7 @@ script:
                 auto call = id(irrigation_phase).make_call();
                 call.set_option("P2");
                 call.perform();
-                id(p1event).stop();
+                //id(p1event).stop();
                 }
     - if: 
         condition:
@@ -1016,6 +1073,9 @@ script:
           - switch.is_on: auto_water
           - lambda: 'return (id(irrigation_phase).state == "P2");'
         then: 
+          - sensor.template.publish:
+              id: last_high
+              state: !lambda "return id(VWC).state;"
           - sensor.template.publish:
               id: last_low
               state: !lambda "return id(VWC).state;"
@@ -1069,6 +1129,33 @@ button:
       then:
         - script.execute: p2event
   - platform: template
+    id: runbootupscript
+    name: "Run bootup script"
+    on_press: 
+      then:
+        - script.execute: bootupscript
+  - platform: template
+    id: setfieldcapacityandp2
+    name: "set FC=VWC and enable p2"
+    on_press: 
+      then:
+        - lambda: |-
+            id(field_capacity).publish_state(id(VWC).state);
+            id(p1_runoff_wc).publish_state(id(VWC).state);
+            // Set last_low value to current VWC
+            id(last_low).publish_state(id(VWC).state);
+            id(last_high).publish_state(id(VWC).state);
+            id(p1_at_field_capacity).publish_state(true);
+            // Set Irrigation Phase to P2 if we are generative to prevent runoff
+            auto call = id(irrigation_phase).make_call();
+            call.set_option("P2");
+            call.perform();
+  - platform: template
     name: "PID Climate Autotune"
     on_press:
+      - climate.pid.set_control_parameters:
+          id: temppid
+          kp: 0.0
+          ki: 0.0
+          kd: 0.0
       - climate.pid.autotune: temppid
