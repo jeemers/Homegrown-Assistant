@@ -3,8 +3,9 @@ esphome:
   friendly_name: 4x4 Brain
   on_boot: 
     then:
-      - delay: 5s
+      - delay: 10s
       - script.execute: bootupscript
+
 
 esp32:
   board: denky32
@@ -12,6 +13,7 @@ esp32:
     type: arduino
 
 # Enable logging
+
 logger:
   logs:
     graph: ERROR
@@ -40,8 +42,6 @@ api:
 ota:
   password: ""
 
-mqtt:
-
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
@@ -56,7 +56,7 @@ web_server:
   port: 80
   ota: false
   js_url: https://attilafarago.hu/smarthome/esphome_web_server/www.js
-
+  
 # Globals to store some template sensor values in between reboots
 globals:
   - id: g_p3_end_wc
@@ -430,7 +430,7 @@ sensor:
     lambda: |-
       float dryback_target = (id(p1_shot_size).state) / 100;
       float media_volume_liters = id(media_volume).state * 3.78541;
-      float water_holding_capacity = 0.667;
+      float water_holding_capacity = id(media_vwc).state / 100 ;
       float water_capacity_liters = media_volume_liters * water_holding_capacity;
       float dryback_percent_water_liters = water_capacity_liters * dryback_target;
       float dryback_percent_water_ml = dryback_percent_water_liters * 1000;
@@ -448,7 +448,7 @@ sensor:
       float shot_target = (id(p1_shot_size).state) / 100;
       float media_volume_gallons = id(media_volume).state;
       float media_volume_liters = media_volume_gallons * 3.78541;
-      float water_holding_capacity = 0.667;
+      float water_holding_capacity = id(media_vwc).state / 100;
       float water_capacity_liters = media_volume_liters * water_holding_capacity;
       float shot_percent_water_liters = water_capacity_liters * shot_target;
       float shot_percent_water_ml = shot_percent_water_liters * 1000;
@@ -474,7 +474,7 @@ sensor:
     lambda: |-
       float dryback_target = (id(p2_shot_size).state) / 100;
       float media_volume_liters = id(media_volume).state * 3.78541;
-      float water_holding_capacity = 0.667;
+      float water_holding_capacity = id(media_vwc).state / 100;
       float water_capacity_liters = media_volume_liters * water_holding_capacity;
       float dryback_percent_water_liters = water_capacity_liters * dryback_target;
       float dryback_percent_water_ml = dryback_percent_water_liters * 1000;
@@ -489,7 +489,7 @@ sensor:
       float shot_target = (id(p2_shot_size).state) / 100;
       float media_volume_gallons = id(media_volume).state;
       float media_volume_liters = media_volume_gallons * 3.78541;
-      float water_holding_capacity = 0.66;
+      float water_holding_capacity = id(media_vwc).state / 100;
       float water_capacity_liters = media_volume_liters * water_holding_capacity;
       float shot_percent_water_liters = water_capacity_liters * shot_target;
       float shot_percent_water_ml = shot_percent_water_liters * 1000;
@@ -600,7 +600,7 @@ sensor:
     unit_of_measurement: "%"
     on_value: 
       then:
-        - lambda: 'id(g_last_high) = x;'
+        - lambda: 'id(g_last_low) = x;'
 
 # We calculate our target P3 VWC based on subtracting our P3 dryback target % from our last high VWC value
   - platform: template
@@ -943,7 +943,8 @@ script:
     - lambda: |-
         // set p3 lights on from current VWC
         id(p3_wc_at_lights_on).publish_state(id(VWC).state);
-
+        id(last_low).publish_state(id(VWC).state);
+        id(last_high).publish_state(id(VWC).state);
         // Reset the counters
         auto call = id(daily_irrigation_events).make_call();
         call.number_to_min();
@@ -953,7 +954,6 @@ script:
         call2.perform();
         // Set the value 0 to a specific input_number
         id(total_daily_ml_estimate).publish_state(0);
-
         id(p1_at_field_capacity).publish_state(false);
     - select.set:
         id: irrigation_phase
