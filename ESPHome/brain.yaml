@@ -3,9 +3,8 @@ esphome:
   friendly_name: 4x4 Brain
   on_boot: 
     then:
-      - delay: 10s
+      - delay: 5s
       - script.execute: bootupscript
-
 
 esp32:
   board: denky32
@@ -13,7 +12,6 @@ esp32:
     type: arduino
 
 # Enable logging
-
 logger:
   logs:
     graph: ERROR
@@ -42,10 +40,7 @@ api:
 ota:
   password: ""
 
-#mqtt:
-#  broker: hass.local
-#  username: sensors
-#  password: !secret mqtt_password
+mqtt:
 
 wifi:
   ssid: !secret wifi_ssid
@@ -61,7 +56,45 @@ web_server:
   port: 80
   ota: false
   js_url: https://attilafarago.hu/smarthome/esphome_web_server/www.js
-    
+
+# Globals to store some template sensor values in between reboots
+globals:
+  - id: g_p3_end_wc
+    type: float
+    restore_value: yes
+    initial_value: '0'
+  - id: g_p3_start_wc
+    type: float
+    restore_value: yes
+    initial_value: '0'
+  - id: g_p3_wc_at_lights_on
+    type: float
+    restore_value: yes
+    initial_value: '0'
+  - id: g_p3_wc_at_lights_off
+    type: float
+    restore_value: yes
+    initial_value: '0'
+  - id: g_p1_at_field_capacity
+    type: boolean
+    restore_value: yes
+  - id: g_field_capacity
+    type: float
+    initial_value: '0'
+    restore_value: yes
+  - id: g_p1_runoff_wc
+    type: float
+    restore_value: yes
+    initial_value: '0'
+  - id: g_last_high
+    type: float
+    restore_value: yes
+    initial_value: '0'
+  - id: g_last_low
+    type: float
+    restore_value: yes
+    initial_value: '0'
+
 substitutions:
   switch_light: "switch.mini_plug_3"
   switch_irrigation_pump: "switch.kasaoutdoor1"
@@ -429,6 +462,9 @@ sensor:
     name: "p1 Runoff VWC"
     icon: "mdi:water-percent"
     unit_of_measurement: "%"
+    on_value: 
+      then:
+        - lambda: 'id(g_p1_runoff_wc) = x;'
 # This sensor is the same as the previous one but for our P2 shots
   - platform: template
     id: p2_irrigation_time
@@ -483,7 +519,9 @@ sensor:
     name: "P3 End VWC"
     icon: "mdi:water-percent"
     unit_of_measurement: "%"
-
+    on_value: 
+      then:
+        - lambda: 'id(g_p3_end_wc) = x;'
 
 # P3 Last dryback will be calculated each morning as soon as P1 starts, based on start and end p3 vwc
   - platform: template
@@ -500,7 +538,9 @@ sensor:
     name: "P3 Start WC"
     icon: "mdi:water-percent"
     unit_of_measurement: "%"
-
+    on_value: 
+      then:
+        - lambda: 'id(g_p3_start_wc) = x;'
 
 # VWC at lights off/on, so we know when we hit the P0 dryback goal
   - platform: template
@@ -509,13 +549,18 @@ sensor:
     icon: "mdi:lightbulb-on-outline"
     internal: false
     unit_of_measurement: "%"
+    on_value: 
+      then:
+        - lambda: 'id(g_p3_wc_at_lights_on) = x;'
   - platform: template
     id: p3_wc_at_lights_off
     name: "P3 WC at Lights Off"
     icon: "mdi:lightbulb-on-outline"
     internal: false
     unit_of_measurement: "%"
-
+    on_value: 
+      then:
+        - lambda: 'id(g_p3_wc_at_lights_off) = x;'
 # The current value of dryback from last known high value til now.
   - platform: template
     id: currentdryback
@@ -532,7 +577,9 @@ sensor:
     name: "Field Capacity"
     icon: "mdi:water-percent"
     unit_of_measurement: "%"
-    
+    on_value: 
+      then:
+        - lambda: 'id(g_field_capacity) = x;'
 # This will get updated everytime VWC updates, if current VWC is > this value.
 # It will also get reset between irrigations, so we can track each dryback and irrigation event
   - platform: template
@@ -541,7 +588,9 @@ sensor:
     icon: "mdi:arrow-up-bold-circle-outline"
     internal: false
     unit_of_measurement: "%"
-
+    on_value: 
+      then:
+        - lambda: 'id(g_last_high) = x;'
 # Similar to last high except gets set at each irrigation event.
   - platform: template
     id: last_low
@@ -549,7 +598,9 @@ sensor:
     icon: "mdi:arrow-down-bold-circle-outline"
     internal: false
     unit_of_measurement: "%"
-
+    on_value: 
+      then:
+        - lambda: 'id(g_last_high) = x;'
 
 # We calculate our target P3 VWC based on subtracting our P3 dryback target % from our last high VWC value
   - platform: template
@@ -873,18 +924,17 @@ script:
   mode: single
   then:
     - lambda: |-
-        // reset last low, last high, field capacity, and runoff to THCS VWC
-        id(last_low).publish_state(id(VWC).state); 
-        id(last_high).publish_state(id(VWC).state); 
-        id(p1_runoff_wc).publish_state(id(VWC).state);
-        id(field_capacity).publish_state(id(VWC).state);
-        id(p3_wc_at_lights_off).publish_state(id(VWC).state);
-        id(p3_start_wc).publish_state(id(VWC).state);
-        auto call2 = id(p1_shot_count).make_call();
-        call2.number_to_min();
-        call2.perform();
-        id(p1_at_field_capacity).publish_state(false);
-        id(p3_start_wc).publish_state(id(VWC).state);
+        // set last low, last high, field capacity, runoff etc to last saved globals
+        id(last_low).publish_state(id(g_last_low)); 
+        id(last_high).publish_state(id(g_last_high)); 
+        id(p1_runoff_wc).publish_state(id(g_p1_runoff_wc));
+        id(field_capacity).publish_state(id(g_field_capacity));
+        id(p3_wc_at_lights_off).publish_state(id(g_p3_wc_at_lights_off));
+        id(p3_wc_at_lights_on).publish_state(id(g_p3_wc_at_lights_on));
+        id(p3_start_wc).publish_state(id(g_p3_start_wc));
+        id(p3_end_wc).publish_state(id(g_p3_end_wc));
+        id(p1_at_field_capacity).publish_state(id(g_p1_at_field_capacity));
+
         
 # Do stuff at lights on
 - id: lightsonscript
@@ -919,11 +969,7 @@ script:
       auto call = id(irrigation_phase).make_call();
       call.set_option("P3");
       call.perform();
-      auto call2 = id(p1_shot_count).make_call();
-      call2.number_to_min();
-      call2.perform();
       id(p1_at_field_capacity).publish_state(false);
-      id(p3_start_wc).publish_state(id(VWC).state);
 
 # vwc_check is gonna get called every time VWC updates
 - id: vwc_check 
