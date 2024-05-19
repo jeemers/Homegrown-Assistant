@@ -3,9 +3,9 @@ esphome:
   friendly_name: 4x4 Brain
   on_boot: 
     then:
-      - delay: 10s
       - script.execute: bootupscript
-
+preferences:
+  flash_write_interval: 10min
 
 esp32:
   board: denky32
@@ -33,6 +33,7 @@ logger:
     pid.climate: ERROR
     climate: INFO
     scd4x: INFO
+    lt.preferences: DEBUG
 
 # Enable Home Assistant API
 api:
@@ -52,11 +53,13 @@ wifi:
     password: !secret wifi_password
 
 captive_portal:
+
 web_server:
   port: 80
   ota: false
   js_url: https://attilafarago.hu/smarthome/esphome_web_server/www.js
   
+
 # Globals to store some template sensor values in between reboots
 globals:
   - id: g_p3_end_wc
@@ -224,9 +227,17 @@ sensor:
       name: "SCD41 CO2"
     temperature:
       name: "SCD41 Temperature"
+      id: scd41temp
     humidity:
       name: "SCD41 Humidity"
-
+      id: scd41hum
+  - platform: template
+    name: "SCD41 VPD"
+    lambda: |-
+          return (((100 - id(scd41hum).state) / 100) * (0.6108 * 2.718281828459045 * (17.27 * ((id(scd41temp).state)) / (((id(scd41temp).state)) + 237.3))));
+    update_interval: 10s
+    unit_of_measurement: kPa
+    
 # AHT10 temp humidity and VPD
   - platform: aht10
     temperature:
@@ -716,6 +727,11 @@ text_sensor:
     id: lights_off_time
     internal: false
     entity_id: ${datetime_lights_off}
+  - platform: homeassistant
+    name: P2 Window Close
+    id: p2_window_close
+    internal: false
+    entity_id: ${datetime_p2window_close}
 
 binary_sensor:
 #####################
@@ -759,7 +775,7 @@ binary_sensor:
   - platform: template
     id: p1_at_field_capacity
     name: "At Field Capacity"
-    
+ 
 light:
 # Button LED
   - platform: binary
@@ -909,6 +925,11 @@ time:
           { 
             ESP_LOGD("main", "lights off");
             id(lightsoffscript).execute();
+          }
+          if (str == to_string(id(p2_window_close).state)) 
+          { 
+            ESP_LOGD("main", "P2 window closed time, P3 starts");
+            id(startP3).execute();
           } 
           if (minutes % freq == 0)
           {
@@ -965,11 +986,19 @@ script:
   then:
     lambda: |-
       id(p3_wc_at_lights_off).publish_state(id(VWC).state);
-      id(p3_start_wc).publish_state(id(last_high).state);
       auto call = id(irrigation_phase).make_call();
       call.set_option("P3");
       call.perform();
-      id(p1_at_field_capacity).publish_state(false);
+      //id(p1_at_field_capacity).publish_state(false);
+
+- id: startP3
+  mode: single
+  then: 
+    - lambda: |-
+        id(p3_start_wc).publish_state(id(last_high).state);
+        auto call = id(irrigation_phase).make_call();
+        call.set_option("P3");
+        call.perform();
 
 # vwc_check is gonna get called every time VWC updates
 - id: vwc_check 
@@ -1117,7 +1146,7 @@ script:
     - if: 
         condition:
           - switch.is_on: auto_water
-          - lambda: 'return (id(irrigation_phase).state == "P2");'
+          - lambda: 'return (id(irrigation_phase).state == "P2");'    
         then: 
           - sensor.template.publish:
               id: last_high
