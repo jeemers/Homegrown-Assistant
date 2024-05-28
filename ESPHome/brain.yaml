@@ -53,12 +53,8 @@ wifi:
     password: !secret wifi_password
 
 captive_portal:
-
 web_server:
   port: 80
-  ota: false
-  js_url: https://attilafarago.hu/smarthome/esphome_web_server/www.js
-  
 
 # Globals to store some template sensor values in between reboots
 globals:
@@ -703,8 +699,9 @@ text_sensor:
 
 # Text sensor to see if Maintainence mode is on and turn the LED on if so.
   - platform: homeassistant
-    name: 4x4 Maintainence status
+    name: Maintainence status
     internal: False
+    id: maintstatus
     entity_id: input_boolean.4x4_maintainence_mode
     on_value:
       then:
@@ -964,8 +961,6 @@ script:
     - lambda: |-
         // set p3 lights on from current VWC
         id(p3_wc_at_lights_on).publish_state(id(VWC).state);
-        id(last_low).publish_state(id(VWC).state);
-        id(last_high).publish_state(id(VWC).state);
         // Reset the counters
         auto call = id(daily_irrigation_events).make_call();
         call.number_to_min();
@@ -1120,6 +1115,7 @@ script:
         condition:
           - switch.is_on: auto_water
           - lambda: 'return (id(irrigation_phase).state == "P1");'
+          - lambda: 'return !(id(maintstatus).state =="on");'
         then: 
           - sensor.template.publish:
               id: last_low
@@ -1146,7 +1142,8 @@ script:
     - if: 
         condition:
           - switch.is_on: auto_water
-          - lambda: 'return (id(irrigation_phase).state == "P2");'    
+          - lambda: 'return (id(irrigation_phase).state == "P2");'   
+          - lambda: 'return !(id(maintstatus).state == "on");'          
         then: 
           - sensor.template.publish:
               id: last_high
