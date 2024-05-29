@@ -765,7 +765,7 @@ script:
         condition:
           - switch.is_on: auto_water
           - lambda: 'return (id(irrigation_phase).state == "P1");'
-          - lambda: 'return (id(maintstatus).state =="Off");'
+          - lambda: 'return !(id(maintstatus).state =="on");'
         then: 
           - sensor.template.publish:
               id: last_low
@@ -792,7 +792,8 @@ script:
     - if: 
         condition:
           - switch.is_on: auto_water
-          - lambda: 'return (id(irrigation_phase).state == "P2");'    
+          - lambda: 'return (id(irrigation_phase).state == "P2");'   
+          - lambda: 'return !(id(maintstatus).state == "on");'          
         then: 
           - sensor.template.publish:
               id: last_high
