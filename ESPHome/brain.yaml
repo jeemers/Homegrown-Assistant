@@ -1,3 +1,15 @@
+substitutions:
+  switch_light: "switch.mini_plug_3" # the switch in home assistant controlling the lights - not implemented yet.
+  switch_irrigation_pump: "switch.kasaoutdoor1" # the switch in home assistant that controls the irrigation pump or valve
+  wwitch_mixing_pump: "switch.4x4brain_pump_3" # thi should be the home assistant entity switch that controls your reservoir mixing pump
+  datetime_lights_on: "input_datetime.4x4_lights_on" # home assistant datetime for lights on
+  datetime_lights_off: "input_datetime.4x4_lights_off" # ^ for lights off
+  datetime_p2window_close: "input_datetime.4x4_p2_window_close" # The time p2 should end and no more shots should be given. adjust to control p3 drybacks
+  boolean_maintainance_mode: "input_boolean.4x4_maintainence_mode" # HA entity for Maintainence mode, which prevents any automations from running when on
+  uart_tx_pin: "18" # This is the TX pin the RS485 adapter is connected to
+  uart_rx_pin: "5" # This is the RX pin the RS485 adapter is conencted to
+  button_pin: "12" # pin the button is connected to if at all
+
 esphome:
   name: 4x4brain
   friendly_name: 4x4 Brain
@@ -93,18 +105,6 @@ globals:
     type: float
     restore_value: yes
     initial_value: '0'
-
-substitutions:
-  switch_light: "switch.mini_plug_3"
-  switch_irrigation_pump: "switch.kasaoutdoor1"
-  wwitch_mixing_pump: "switch.4x4brain_pump_3" # thi should be the home assistant entity switch that controls your reservoir mixing pump
-  datetime_lights_on: "input_datetime.4x4_lights_on"
-  datetime_lights_off: "input_datetime.4x4_lights_off"
-  datetime_p2window_close: "input_datetime.4x4_p2_window_close"
-  boolean_maintainance_mode: "input_boolean.4x4_maintainence_mode"
-  uart_tx_pin: "18" # This is the TX pin the RS485 adapter is connected to
-  uart_rx_pin: "5" # This is the RX pin the RS485 adapter is conencted to
-  button_pin: "12" # pin the button is connected to if at all
 
 <<: !include addons/thcs-config.yaml  # This file has the UART settings, and number variables in it
 <<: !include addons/brain-display.yaml  # This file has settings for the screen, comment out if you dont have ont.
