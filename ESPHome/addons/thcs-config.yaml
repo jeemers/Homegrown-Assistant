@@ -131,7 +131,7 @@ number:
     mode: box
     entity_category: config 
     unit_of_measurement: minutes
-# VWC % Shot size target
+# P1 VWC % Shot size target
   - platform: template
     id: p1_shot_size
     name: "P1 Shot %"
@@ -187,7 +187,7 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: "EC"
-
+# P2 dryback VWC target, when sensor VWC is at or below this we should give a shot
   - platform: template
     id: p2_dryback_target
     name: "P2 Dryback Target"
@@ -214,7 +214,20 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: "%"
-    
+# How Often P2 should water
+  - platform: template
+    id: p2_frequency
+    name: "P2 Frequency"
+    icon: "mdi:water-percent"
+    min_value: 0
+    max_value: 600
+    initial_value: 60
+    step: 1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config 
+    unit_of_measurement: minutes
   - platform: template
     id: p3_dryback_target
     name: "P3 Dryback Target"
