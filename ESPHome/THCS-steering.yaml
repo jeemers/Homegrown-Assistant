@@ -1,3 +1,12 @@
+substitutions:
+  switch_irrigation_pump: "switch.pump_valve"  # HA pump entity that controls the pump/valve
+  datetime_lights_on: "input_datetime.4x4_lights_on"  # HA lights on time for the zone
+  datetime_lights_off: "input_datetime.4x4_lights_off"  # HA Lights off time
+  datetime_p2window_close: "input_datetime.4x4_p2_window_close"  # HA last time during p2 to water, to control p3 drybacks
+  boolean_maintainance_mode: "input_boolean.4x4_maintainence_mode" # HA switch that prevents any automations from running when its on
+  uart_tx_pin: "12" # This is the TX pin the RS485 adapter is connected to
+  uart_rx_pin: "13" # This is the RX pin the RS485 adapter is conencted to
+
 esphome:
   name: thcstest
   friendly_name: THC-S test
@@ -76,15 +85,6 @@ globals:
     type: float
     restore_value: yes
     initial_value: '0'
-
-substitutions:
-  switch_irrigation_pump: "switch.pump_valve"
-  datetime_lights_on: "input_datetime.4x4_lights_on"
-  datetime_lights_off: "input_datetime.4x4_lights_off"
-  datetime_p2window_close: "input_datetime.4x4_p2_window_close"
-  boolean_maintainance_mode: "input_boolean.4x4_maintainence_mode"
-  uart_tx_pin: "12" # This is the TX pin the RS485 adapter is connected to
-  uart_rx_pin: "13" # This is the RX pin the RS485 adapter is conencted to
 
 <<: !include addons/thcs-config.yaml  # This file has the UART settings, and number variables in it
  
