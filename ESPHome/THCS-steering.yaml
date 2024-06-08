@@ -813,7 +813,7 @@ script:
                   entity_id: ${switch_irrigation_pump}
           - number.increment: daily_irrigation_events
           - logger.log: "Delaying to let that last shot spread out."
-          - delay: !lambda "return id(p2_frequency).state*1000;"
+          - delay: !lambda "return id(p2_frequency).state*60*1000;"
 
             
     # do any VWC/PWEC calculations here evnetually
