@@ -15,7 +15,7 @@ esphome:
       - script.execute: bootupscript
 
 preferences:
-  flash_write_interval: 10min
+  flash_write_interval: 30min
 
 esp32:
   board: esp32dev
