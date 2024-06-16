@@ -739,27 +739,28 @@ script:
     - if:
         condition:
           and: 
-            - lambda: 'return ((id(VWC).state - id(last_low).state) <= 1.1);'
-            - lambda: 'return (!(id(p1_at_field_capacity).state));'
-            - lambda: 'return (id(p1_shot_count).state > (id(p1_target_shots).state / 2));'
+            - lambda: 'return ((id(VWC).state - id(last_low).state) <= 1.1);' # if the current VWC at time of irrigation isnt more than 1.1% higher than last low
+            - lambda: 'return ((id(field_capacity).state - id(VWC).state) <= 10);' # And if the current VWC is within 10% of yesterday's field capacity
+            #- lambda: 'return (!(id(p1_at_field_capacity).state));' # and if we aren't already at field capacity (commented out to see if we can keep updating)
+            - lambda: 'return (id(p1_shot_count).state > (id(p1_target_shots).state / 2));' # and if we have used at least half of our p1 shots, incase the early shots dont get VWC high enough
         then: 
           - logger.log: "Looks like we hit field capacity"
           - lambda: |-
                 // Set p1_at_field_capacity to true
                 id(p1_at_field_capacity).publish_state(true);
-                // Set field_capacity to VWC
+                // Set field_capacity to VWC and estimated runoff 
                 id(field_capacity).publish_state(id(VWC).state);
                 id(p1_runoff_wc).publish_state(id(last_high).state);
                 // Set last_low value to current VWC
                 id(last_low).publish_state(id(VWC).state);
-                // Set Irrigation Phase to P2 if we are generative to prevent runoff
-                if ((id(p1_target_shots).state - id(p1_shot_count).state <= (id(p1_target_shots).state / 2) ) && ((id(steering_phase).state == "Generative - Flip") || (id(steering_phase).state == "Generative - Finish")))
+                // set P2 and end P1 early if pwec is lower than our P2 target EC
+                // OR if we are generative to prevent too much runoff and keep stacking EC
+                if ((id(pw_ec).state <= id(p2_ec_target).state ) || ((id(steering_phase).state == "Generative - Flip") || (id(steering_phase).state == "Generative - Finish")))
                 {
                 //id(irrigation_phase).set_option("P2");
                 auto call = id(irrigation_phase).make_call();
                 call.set_option("P2");
                 call.perform();
-                //id(p1event).stop();
                 }
     - if: 
         condition:
