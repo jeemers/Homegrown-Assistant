@@ -1,0 +1,100 @@
+blueprint:
+  name: Automated Irrigation Control
+  description: Automates irrigation based on VWC and EC levels.
+  domain: automation
+  input:
+    vwc_min:
+      name: Minimum VWC
+      description: Minimum volumetric water content threshold
+      default: 30
+    vwc_max:
+      name: Maximum VWC
+      description: Maximum volumetric water content threshold
+      default: 60
+    ec_min:
+      name: Minimum EC
+      description: Minimum electrical conductivity threshold
+      default: 1.0
+    ec_max:
+      name: Maximum EC
+      description: Maximum electrical conductivity threshold
+      default: 2.5
+    irrigation_shot_time:
+      name: Irrigation Shot Time
+      description: Duration to turn on the pump for irrigation (in seconds)
+      default: 10
+    min_irrigation_delay:
+      name: Minimum Irrigation Delay
+      description: Minimum time between irrigation attempts (in minutes)
+      default: 30
+    light_entity:
+      name: Light Entity
+      description: Light entity that needs to be on for irrigation
+      selector:
+        entity:
+          domain: light
+    pump_switch:
+      name: Pump Switch
+      description: The pump switch to activate for irrigation
+      selector:
+        entity:
+          domain: switch
+    maintenance_mode:
+      name: Maintenance Mode
+      description: Entity to disable irrigation when active
+      selector:
+        entity:
+          domain: input_boolean
+    vwc_sensor:
+      name: VWC Sensor
+      description: Sensor entity providing the current volumetric water content
+      selector:
+        entity:
+          domain: sensor
+    ec_sensor:
+      name: EC Sensor
+      description: Sensor entity providing the current electrical conductivity
+      selector:
+        entity:
+          domain: sensor
+
+trigger:
+  - platform: time_pattern
+    minutes: "/{{ (min_irrigation_delay | int) }}"
+
+condition:
+  - condition: state
+    entity_id: !input light_entity
+    state: "on"
+  - condition: state
+    entity_id: !input maintenance_mode
+    state: "off"
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ states(!input vwc_sensor) | float < (!input vwc_min | float) }}
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input pump_switch
+          - delay:
+              seconds: !input irrigation_shot_time
+          - service: switch.turn_off
+            target:
+              entity_id: !input pump_switch
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ states(!input ec_sensor) | float > (!input ec_max | float) }}
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input pump_switch
+          - delay:
+              seconds: !input irrigation_shot_time
+          - service: switch.turn_off
+            target:
+              entity_id: !input pump_switch
