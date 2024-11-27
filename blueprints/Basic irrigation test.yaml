@@ -28,11 +28,11 @@ blueprint:
       description: Minimum time between irrigation attempts (in minutes)
       default: 30
     light_entity:
-      name: Light Entity
+      name: Light Switch
       description: Light entity that needs to be on for irrigation
       selector:
         entity:
-          domain: light
+          domain: switch
     pump_switch:
       name: Pump Switch
       description: The pump switch to activate for irrigation
