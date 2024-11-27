@@ -6,27 +6,27 @@ blueprint:
     vwc_min:
       name: Minimum VWC
       description: Minimum volumetric water content threshold
-      default: 30
+      default: 55
     vwc_max:
       name: Maximum VWC
       description: Maximum volumetric water content threshold
-      default: 60
+      default: 67
     ec_min:
       name: Minimum EC
       description: Minimum electrical conductivity threshold
-      default: 1.0
+      default: 2
     ec_max:
       name: Maximum EC
       description: Maximum electrical conductivity threshold
-      default: 2.5
+      default: 6
     irrigation_shot_time:
       name: Irrigation Shot Time
       description: Duration to turn on the pump for irrigation (in seconds)
-      default: 10
+      default: 15
     min_irrigation_delay:
       name: Minimum Irrigation Delay
       description: Minimum time between irrigation attempts (in minutes)
-      default: 30
+      default: 60
     light_entity:
       name: Light Switch
       description: Light entity that needs to be on for irrigation
