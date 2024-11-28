@@ -60,7 +60,7 @@ blueprint:
 
 trigger:
   - platform: time_pattern
-    minutes: "/{{ (min_irrigation_delay | int) }}"
+    minutes: "/{{ (states(min_irrigation_delay)|int) }}"
 
 condition:
   - condition: state
@@ -75,7 +75,7 @@ action:
       - conditions:
           - condition: template
             value_template: >
-              {{ states(!input vwc_sensor) | float < (!input vwc_min | float) }}
+              {{ states(vwc_sensor) | float < (vwc_min | float) }}
         sequence:
           - service: switch.turn_on
             target:
@@ -88,7 +88,7 @@ action:
       - conditions:
           - condition: template
             value_template: >
-              {{ states(!input ec_sensor) | float > (!input ec_max | float) }}
+              {{ states(ec_sensor) | float > (ec_max | float) }}
         sequence:
           - service: switch.turn_on
             target:
