@@ -57,6 +57,7 @@ blueprint:
       selector:
         entity:
           domain: sensor
+
 variables:
     ec_sensor: !input 'ec_sensor'
     vwc_sensor: !input 'vwc_sensor'
@@ -73,14 +74,14 @@ variables:
     
 trigger:
   - platform: time_pattern
-    minutes: "/{{ (states(min_irrigation_delay)|int) }}"
+    minutes: "/{{ states(min_irrigation_delay)|int }}"
 
 condition:
   - condition: state
-    entity_id: !input light_entity
+    entity_id: light_entity
     state: "on"
   - condition: state
-    entity_id: !input maintenance_mode
+    entity_id: maintenance_mode
     state: "off"
 
 action:
@@ -111,3 +112,5 @@ action:
           - service: switch.turn_off
             target:
               entity_id: !input pump_switch
+  - delay:
+      minutes: !input min_irrigation_delay
