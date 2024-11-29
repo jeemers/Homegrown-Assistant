@@ -74,7 +74,7 @@ variables:
     
 trigger:
   - platform: time_pattern
-    minutes: {{states(min_irrigation_delay)}}
+    minutes: {{ states(min_irrigation_delay) }}
 
 condition:
   - condition: state
