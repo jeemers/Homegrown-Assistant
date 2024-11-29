@@ -74,7 +74,7 @@ variables:
     
 trigger:
   - platform: time_pattern
-    minutes: !input 'min_irrigation_delay'
+    minutes: '/1'
 
 condition:
   - condition: state
