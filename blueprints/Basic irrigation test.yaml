@@ -74,14 +74,14 @@ variables:
     
 trigger:
   - platform: time_pattern
-    minutes: "/{{ states(min_irrigation_delay)|int }}"
+    minutes: "/{{ states(min_irrigation_delay) }}"
 
 condition:
   - condition: state
-    entity_id: light_entity
+    entity_id: !input 'light_entity'
     state: "on"
   - condition: state
-    entity_id: maintenance_mode
+    entity_id: !input 'maintenance_mode'
     state: "off"
 
 action:
@@ -93,12 +93,12 @@ action:
         sequence:
           - service: switch.turn_on
             target:
-              entity_id: !input pump_switch
+              entity_id: !input 'pump_switch'
           - delay:
-              seconds: !input irrigation_shot_time
+              seconds: !input 'irrigation_shot_time'
           - service: switch.turn_off
             target:
-              entity_id: !input pump_switch
+              entity_id: !input 'pump_switch'
       - conditions:
           - condition: template
             value_template: >
@@ -106,11 +106,11 @@ action:
         sequence:
           - service: switch.turn_on
             target:
-              entity_id: !input pump_switch
+              entity_id: !input 'pump_switch'
           - delay:
-              seconds: !input irrigation_shot_time
+              seconds: !input 'irrigation_shot_time'
           - service: switch.turn_off
             target:
-              entity_id: !input pump_switch
+              entity_id: !input 'pump_switch'
   - delay:
-      minutes: !input min_irrigation_delay
+      minutes: !input 'min_irrigation_delay'
