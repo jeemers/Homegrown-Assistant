@@ -64,7 +64,7 @@ variables:
     maintenance_mode: !input 'maintenance_mode'
     pump_switch: !input 'pump_switch'
     light_entity: !input 'light_entity'
-    min_irrigation_delay: /!input 'min_irrigation_delay'
+    min_irrigation_delay: !input 'min_irrigation_delay'
     irrigation_shot_time: !input 'irrigation_shot_time'
     ec_sensor: !input 'ec_sensor'
     vwc_min: !input 'vwc_min'
@@ -74,7 +74,7 @@ variables:
     
 trigger:
   - platform: time_pattern
-    minutes: {{ states(min_irrigation_delay) }}
+    minutes: !input 'min_irrigation_delay'
 
 condition:
   - condition: state
