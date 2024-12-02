@@ -27,7 +27,6 @@ api:
 
 ota:
   platform: esphome
-
   password: ""
 
 wifi:
@@ -68,11 +67,12 @@ modbus:
   uart_id: modbus_serial
  
 modbus_controller:
-  - id: con_modbus_name
-    update_interval: 20s
+  - id: thcs1  # For each THC sensor, we need one 'controller' id for each sensor to refer to later
+    update_interval: 10s
     address: 0x1
-    command_throttle: 100ms
+    command_throttle: 50ms
     setup_priority: -10
+    
 sensor:
 ####################################
 ## H A R D W A R E  S E N S O R S ##
@@ -91,7 +91,7 @@ sensor:
     filters:
       lambda: return (x / 10);
     state_class: measurement
-
+    modbus_controller_id: thcs1  # This is the controller mentioned earlier, for additional THCS or other RS485 sensors this will be  updated
 
 # Temp in C from the THCS  
   - platform: modbus_controller
@@ -105,6 +105,7 @@ sensor:
     filters: 
       lambda: return (x / 10);
     state_class: measurement
+    modbus_controller_id: thcs1
 
 
 # Raw conductivity from the THCS, used for pwEC calculatiions
@@ -119,6 +120,7 @@ sensor:
     filters:
       lambda: return x;
     state_class: measurement
+    modbus_controller_id: thcs1
 
 # This is a "TDS" output from the sensor in PPM, not sure what conversion or accuracy.    
   - platform: modbus_controller
@@ -133,6 +135,7 @@ sensor:
     filters:
       lambda: return x;
     state_class: measurement
+    modbus_controller_id: thcs1
 
 
 # This template is estimating the VWC based on raw moisture and a 66.7% VWC Coco coir
