@@ -14,13 +14,49 @@ modbus_controller:
   - id: con_modbus_name
     update_interval: 20s
     address: 0x1
-    command_throttle: 100ms
+    command_throttle: 50ms
     setup_priority: -10
 
    
 
 # Numbers are user inputs for various settings.
 number:
+  - platform: template
+    id: us_low_read
+    name: "Ultrasonic res empty reading"
+    min_value: 0
+    max_value: 1000
+    initial_value: 69
+    step: 0.1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "cm"
+  - platform: template
+    id: us_volume
+    name: "Ultrasonic res volume"
+    min_value: 0
+    max_value: 1000
+    initial_value: 115
+    step: 0.1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "l"
+  - platform: template
+    id: us_full_read
+    name: "Ultrasonic res full reading"
+    min_value: 1
+    max_value: 1000
+    initial_value: 22
+    step: 0.1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "cm"
   - platform: template
     id: min_fan_speed
     name: "Minimum Fan Speed"
@@ -87,7 +123,21 @@ number:
     mode: box
     entity_category: config
     unit_of_measurement: "plants"
+  - platform: template
+    id: leafoffset
+    name: "leaf temp offset"
+    icon: "mdi:sprout"
+    min_value: -10
+    max_value: 10
+    initial_value: -1
+    step: 0.1
+    restore_value: true
+    optimistic: True
+    mode: box
+    entity_category: config
+    unit_of_measurement: "C"
     
+
 # This is the total drip rate each plant is getting per minute.
 # If you have 1 liter per minute drippers, and you use 2 drippers per plant, this should be 2000
   - platform: template
