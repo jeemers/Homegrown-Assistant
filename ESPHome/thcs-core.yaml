@@ -1,8 +1,14 @@
 substitutions:
-  uart_tx_pin: "12" # This is the TX pin the RS485 adapter is connected to
-  uart_rx_pin: "13" # This is the RX pin the RS485 adapter is conencted to
+  uart_tx_pin: "12" # This is the pin on the microcontroller connecting to the TX pin the RS485 adapter
+  uart_rx_pin: "13" # This is the pin on the microcontroller connecting to the RX pin the RS485 adapter
+# When setting the tx and rx pins, be sure to set the correct model under the esp32: key further down, 
+# and compare the pin numbers printed on the PCB to the documentation from the manufacturer, and input the corresponding GPIO pin numbers here.
+# the "DXX" pins on the PCB don't always match the "GPIOXX" pins in ESPHome, so just double check.
+# most adapters have status LEDs, an RX and TX, when working properly the TX and RX should flash quickly in sequence.
+# if RX only flashes, the tx/rx pins are swapped.
+# if TX only flashes, the sensors aren't wired correctly or aren't powered enough
+# if either LED stays lit up, the wrong pins are probably defined.
 
-esphome:
   name: thcscore
   friendly_name: THC-S Core
   on_boot: 
@@ -13,7 +19,7 @@ preferences:
   flash_write_interval: 90min
 
 esp32:
-  board: esp32dev
+  board: esp32dev  # Try and define the board you are using as closely as possible to enure proper pin assignments.
   framework:
     type: arduino
 
